@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  notification-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: notification-service
+    ports:
+      - "3003:3003"
+    environment:
+      - NODE_ENV=development
+      - PORT=3003
+      - LOG_LEVEL=debug
+      - MONGODB_URI=mongodb://mongo:27017
+      - MONGODB_DB_NAME=notifications_db
+      - NATS_URL=nats://nats:4222
+      - NATS_SUBJECTS=orders.created,orders.paid,orders.canceled,delivery.assigned,delivery.status.updated,delivery.completed,rental.started,rental.renewed,rental.ended
+      - SEED_TEMPLATES=true
+      - MOCK_PROVIDERS=true
+      - AUTH_JWT_REQUIRED=false
+      - FEATURE_PREFERENCES=true
+    depends_on:
+      - mongo
+      - nats
+    networks:
+      - notification-network
+    restart: unless-stopped
+
+  mongo:
+    image: mongo:7
+    container_name: notification-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - notification-network
+    restart: unless-stopped
+
+  nats:
+    image: nats:2.10-alpine
+    container_name: notification-nats
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    command: "--http_port 8222"
+    networks:
+      - notification-network
+    restart: unless-stopped
+
+volumes:
+  mongo-data:
+
+networks:
+  notification-network:
+    driver: bridge
