@@ -1,0 +1,373 @@
+openapi: 3.0.3
+info:
+  title: Notification Service API
+  description: |
+    Microserviço de notificações para Click Delivery
+    
+    Suporta notificações via:
+    - Push (Firebase Cloud Messaging)
+    - E-mail (SendGrid via SMTP)
+    - SMS (Twilio)
+    
+    Com políticas de fallback, preferências de usuário, retry/backoff e métricas Prometheus.
+  version: 1.0.0
+  contact:
+    name: Click Delivery Team
+
+servers:
+  - url: http://localhost:3003/api/v1
+    description: Local development
+  - url: https://notifications.clickdelivery.com.br/api/v1
+    description: Production
+
+tags:
+  - name: Notifications
+    description: Operações de notificações
+  - name: Preferences
+    description: Preferências de usuário
+  - name: System
+    description: Endpoints de sistema
+
+paths:
+  /health:
+    get:
+      tags:
+        - System
+      summary: Health check
+      description: Verifica o status do serviço
+      responses:
+        '200':
+          description: Serviço saudável
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: healthy
+                  timestamp:
+                    type: string
+                    format: date-time
+                  uptime:
+                    type: number
+
+  /metrics:
+    get:
+      tags:
+        - System
+      summary: Prometheus metrics
+      description: Retorna métricas no formato Prometheus
+      responses:
+        '200':
+          description: Métricas
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /notifications:
+    post:
+      tags:
+        - Notifications
+      summary: Criar notificação
+      description: Cria uma nova notificação (admin/interno)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - recipient
+                - templateKey
+              properties:
+                eventId:
+                  type: string
+                  description: ID do evento (gerado se não fornecido)
+                eventType:
+                  type: string
+                  description: Tipo do evento
+                  example: manual
+                recipient:
+                  $ref: '#/components/schemas/Recipient'
+                templateKey:
+                  type: string
+                  example: order_paid
+                data:
+                  type: object
+                  description: Variáveis do template
+                  example:
+                    orderId: "12345"
+                    customerName: "João Silva"
+                    amount: "45.90"
+      responses:
+        '201':
+          description: Notificação criada com sucesso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  notificationId:
+                    type: string
+        '400':
+          description: Requisição inválida
+        '401':
+          description: Não autenticado
+        '403':
+          description: Não autorizado
+
+    get:
+      tags:
+        - Notifications
+      summary: Listar notificações
+      description: Lista notificações com filtros (admin vê todas, usuário vê apenas as próprias)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [QUEUED, SENT, FAILED, PARTIAL, RETRY]
+        - name: recipient.userId
+          in: query
+          schema:
+            type: string
+        - name: eventType
+          in: query
+          schema:
+            type: string
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Lista de notificações
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Notification'
+                  pagination:
+                    type: object
+                    properties:
+                      page:
+                        type: integer
+                      limit:
+                        type: integer
+                      total:
+                        type: integer
+                      pages:
+                        type: integer
+
+  /notifications/{id}:
+    get:
+      tags:
+        - Notifications
+      summary: Obter notificação por ID
+      description: Retorna detalhes de uma notificação
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Detalhes da notificação
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+        '404':
+          description: Notificação não encontrada
+
+  /preferences/{userId}:
+    get:
+      tags:
+        - Preferences
+      summary: Obter preferências do usuário
+      description: Retorna as preferências de notificação do usuário
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Preferências do usuário
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Preferences'
+
+    put:
+      tags:
+        - Preferences
+      summary: Atualizar preferências do usuário
+      description: Atualiza as preferências de notificação do usuário
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PreferencesInput'
+      responses:
+        '200':
+          description: Preferências atualizadas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  preferences:
+                    $ref: '#/components/schemas/Preferences'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Recipient:
+      type: object
+      properties:
+        userId:
+          type: string
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+        deviceToken:
+          type: string
+        role:
+          type: string
+          enum: [customer, restaurant, deliverer, admin]
+
+    Notification:
+      type: object
+      properties:
+        id:
+          type: string
+        eventId:
+          type: string
+        eventType:
+          type: string
+        recipient:
+          $ref: '#/components/schemas/Recipient'
+        channelsTried:
+          type: array
+          items:
+            type: string
+            enum: [push, email, sms]
+        status:
+          type: string
+          enum: [QUEUED, SENT, FAILED, PARTIAL, RETRY]
+        lastError:
+          type: string
+          nullable: true
+        templateKey:
+          type: string
+        metadata:
+          type: object
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    Preferences:
+      type: object
+      properties:
+        userId:
+          type: string
+        channels:
+          type: object
+          properties:
+            email:
+              type: boolean
+            push:
+              type: boolean
+            sms:
+              type: boolean
+        events:
+          type: object
+          additionalProperties:
+            type: object
+        quietHours:
+          type: object
+          nullable: true
+          properties:
+            start:
+              type: integer
+            end:
+              type: integer
+        locale:
+          type: string
+          default: pt-BR
+
+    PreferencesInput:
+      type: object
+      properties:
+        channels:
+          type: object
+          properties:
+            email:
+              type: boolean
+            push:
+              type: boolean
+            sms:
+              type: boolean
+        events:
+          type: object
+        quietHours:
+          type: object
+          nullable: true
+        locale:
+          type: string
