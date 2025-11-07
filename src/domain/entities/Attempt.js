@@ -50,7 +50,7 @@ class Attempt {
       error: doc.error,
       errorCode: doc.errorCode,
       providerMessageId: doc.providerMessageId,
-      derationMs: doc.durationMs,
+      durationMs: doc.durationMs,
       startedAt: doc.startedAt,
       finishedAt: doc.finishedAt
     });
