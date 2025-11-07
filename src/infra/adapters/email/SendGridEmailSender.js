@@ -43,7 +43,10 @@ class SendGridEmailSender {
 
       const subject = subjectTemplate(notification.metadata);
       const html = bodyTemplate(notification.metadata);
-      const text = html.replace(/<[^>]*>/g, ''); // Strip HTML for text version
+      
+      // For text version, use the rendered HTML as-is since our templates are plain text friendly
+      // In production, consider using a proper HTML-to-text library if templates contain HTML
+      const text = html;
 
       notification.setRendered('email', { subject, html, text });
 
