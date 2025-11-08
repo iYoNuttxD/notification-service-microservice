@@ -1,5 +1,3 @@
-const { MongoClient } = require('mongodb');
-
 class MongoAttemptRepository {
   constructor(mongoClient, dbName) {
     this.client = mongoClient;
@@ -10,17 +8,7 @@ class MongoAttemptRepository {
   async init() {
     const db = this.client.db(this.dbName);
     this.collection = db.collection('attempts');
-
-    // Create indexes
-    await this.collection.createIndex({ notificationId: 1 });
-    await this.collection.createIndex({ channel: 1, provider: 1 });
-
-    // TTL index
-    const retentionDays = parseInt(process.env.RETENTION_DAYS || '90', 10);
-    await this.collection.createIndex(
-      { startedAt: 1 },
-      { expireAfterSeconds: retentionDays * 24 * 60 * 60 }
-    );
+    // Removido: índices agora criados centralmente em ensureIndexes().
   }
 
   async save(attempt) {
