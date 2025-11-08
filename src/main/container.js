@@ -40,17 +40,17 @@ async function createContainer() {
 
   logger.info('Initializing application container...');
 
-  // MongoDB connection
+  // 1) MongoDB
   const mongoClient = new MongoClient(process.env.MONGODB_URI);
   await mongoClient.connect();
   logger.info('Connected to MongoDB');
 
   const dbName = process.env.MONGODB_DB_NAME || 'notifications_db';
 
-  // Ensure all indexes are created
+  // Ensure all indexes (function is already tolerant to existing indexes)
   await ensureIndexes(mongoClient, dbName, logger);
 
-  // Initialize repositories
+  // 2) Repositories (init must NOT recreate indexes)
   const notificationRepository = new MongoNotificationRepository(mongoClient, dbName);
   await notificationRepository.init();
 
@@ -66,87 +66,95 @@ async function createContainer() {
   const inboxRepository = new MongoInboxRepository(mongoClient, dbName);
   await inboxRepository.init();
 
-  // Seed templates if enabled
+  // Seed templates (best-effort; never crash startup)
   if (process.env.SEED_TEMPLATES === 'true') {
-    logger.info('Seeding default templates...');
-    const seedResult = await templateRepository.seedDefaults();
-    logger.info('Template seeding completed', seedResult);
+    try {
+      logger.info('Seeding default templates...');
+      const seedResult = await templateRepository.seedDefaults();
+      logger.info('Template seeding completed', seedResult);
+    } catch (err) {
+      logger.warn('Template seeding failed (continuing startup)', { error: err.message });
+    }
   }
 
-  // Initialize NATS
-  const natsEventBus = new NatsEventBus({
-    url: process.env.NATS_URL || 'nats://localhost:4222',
-    queueGroup: process.env.NATS_QUEUE_GROUP || 'notification-service-workers'
-  }, logger);
-  await natsEventBus.connect();
+  // 3) NATS (connect is best-effort; service can run without it)
+  let natsEventBus = null;
+  try {
+    natsEventBus = new NatsEventBus({
+      url: process.env.NATS_URL || 'nats://localhost:4222',
+      queueGroup: process.env.NATS_QUEUE_GROUP || 'notification-service-workers'
+    }, logger);
+    await natsEventBus.connect();
+    logger.info('Connected to NATS', { server: process.env.NATS_URL || 'nats://localhost:4222' });
+  } catch (err) {
+    logger.error('Failed to connect to NATS (continuing without NATS)', { error: err.message });
+  }
 
-  // Initialize channel senders
-  const emailSender = new SendGridEmailSender({
-    host: process.env.SMTP_HOST,
-    port: parseInt(process.env.SMTP_PORT || '587', 10),
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-    from: process.env.EMAIL_FROM || 'notifications@clickdelivery.com.br'
-  }, logger, metrics);
+  // 4) Channel senders (instantiate only when credentials exist)
+  const channelSenders = {};
 
-  let smsSender = null;
-  const haveTwilioCreds = process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_FROM;
-  if (haveTwilioCreds) {
-    smsSender = new TwilioSmsSender({
-      accountSid: process.env.TWILIO_ACCOUNT_SID,
-      authToken: process.env.TWILIO_AUTH_TOKEN,
-      from: process.env.TWILIO_FROM
-    }, logger, metrics);
-    logger.info('Twilio SMS sender initialized');
+  // Email (SMTP)
+  const haveSmtpCreds = !!(process.env.SMTP_HOST && process.env.EMAIL_FROM);
+  if (haveSmtpCreds) {
+    try {
+      channelSenders.email = new SendGridEmailSender({
+        host: process.env.SMTP_HOST,
+        port: parseInt(process.env.SMTP_PORT || '587', 10),
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+        from: process.env.EMAIL_FROM || 'notifications@clickdelivery.com.br'
+      }, logger, metrics);
+      logger.info('Email sender initialized (SMTP)');
+    } catch (err) {
+      logger.warn('Failed to initialize Email sender - disabling email channel', { error: err.message });
+    }
+  } else {
+    logger.info('SMTP credentials not provided - Email channel disabled');
+  }
+
+  // SMS (Twilio) - enable only if all required vars exist OR if running in mock mode
+  const mockProviders = process.env.MOCK_PROVIDERS === 'true';
+  const haveTwilioCreds = !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_FROM);
+  if (mockProviders || haveTwilioCreds) {
+    try {
+      channelSenders.sms = new TwilioSmsSender({
+        accountSid: process.env.TWILIO_ACCOUNT_SID,
+        authToken: process.env.TWILIO_AUTH_TOKEN,
+        from: process.env.TWILIO_FROM
+      }, logger, metrics);
+      logger.info(mockProviders ? 'SMS sender in MOCK mode' : 'Twilio SMS sender initialized');
+    } catch (err) {
+      logger.warn('Failed to initialize SMS sender - disabling SMS channel', { error: err.message });
+    }
   } else {
     logger.info('Twilio credentials not provided - SMS channel disabled');
   }
 
-  let pushSender = null;
-  const haveFcmCreds = process.env.FCM_PROJECT_ID && process.env.FCM_CLIENT_EMAIL && process.env.FCM_PRIVATE_KEY;
+  // Push (FCM) - enable only if full service account info is present
+  const haveFcmCreds = !!(process.env.FCM_PROJECT_ID && process.env.FCM_CLIENT_EMAIL && process.env.FCM_PRIVATE_KEY);
   if (haveFcmCreds) {
-    pushSender = new FcmPushSender({
-      projectId: process.env.FCM_PROJECT_ID,
-      clientEmail: process.env.FCM_CLIENT_EMAIL,
-      privateKey: process.env.FCM_PRIVATE_KEY
-    }, logger, metrics);
-    logger.info('FCM push sender initialized');
+    try {
+      channelSenders.push = new FcmPushSender({
+        projectId: process.env.FCM_PROJECT_ID,
+        clientEmail: process.env.FCM_CLIENT_EMAIL,
+        privateKey: process.env.FCM_PRIVATE_KEY
+      }, logger, metrics);
+      logger.info('FCM push sender initialized');
+    } catch (err) {
+      logger.warn('Failed to initialize FCM sender - disabling Push channel', { error: err.message });
+    }
   } else {
     logger.info('FCM credentials not provided - Push channel disabled');
   }
 
-  const channelSenders = {
-    email: emailSender
-  };
-  if (smsSender) channelSenders.sms = smsSender;
-  if (pushSender) channelSenders.push = pushSender;
-
-  const smsSender = new TwilioSmsSender({
-    accountSid: process.env.TWILIO_ACCOUNT_SID,
-    authToken: process.env.TWILIO_AUTH_TOKEN,
-    from: process.env.TWILIO_FROM
-  }, logger, metrics);
-
-  const pushSender = new FcmPushSender({
-    projectId: process.env.FCM_PROJECT_ID,
-    clientEmail: process.env.FCM_CLIENT_EMAIL,
-    privateKey: process.env.FCM_PRIVATE_KEY
-  }, logger, metrics);
-
-  const channelSenders = {
-    email: emailSender,
-    sms: smsSender,
-    push: pushSender
-  };
-
-  // Initialize OPA client
+  // 5) OPA client (optional)
   const opaClient = new OpaClient({
     url: process.env.OPA_URL,
     policyPath: process.env.OPA_POLICY_PATH || '/v1/data/notifications/allow',
-    failOpen: process.env.OPA_FAIL_OPEN
+    failOpen: (process.env.OPA_FAIL_OPEN || 'true') === 'true'
   }, logger);
 
-  // Initialize auth verifier
+  // 6) Auth verifier (JWT/JWKS)
   const authVerifier = new JwtAuthVerifier({
     jwksUri: process.env.AUTH_JWKS_URI,
     issuer: process.env.AUTH_JWT_ISSUER,
@@ -154,10 +162,10 @@ async function createContainer() {
     secret: process.env.AUTH_JWT_SECRET
   }, logger);
 
-  // Parse backoff sequence
+  // 7) Policies / backoff
   const backoffSequence = parseBackoffSequence(process.env.NOTIF_BACKOFF_SEQUENCE);
 
-  // Initialize use cases - Notifications
+  // 8) Use cases - Notifications
   const dispatchNotificationUseCase = new DispatchNotificationUseCase({
     notificationRepository,
     attemptRepository,
@@ -165,7 +173,7 @@ async function createContainer() {
     preferencesRepository,
     inboxRepository,
     channelSenders,
-    eventPublisher: natsEventBus,
+    eventPublisher: natsEventBus, // can be null; caller must handle publish errors
     logger,
     metrics,
     backoffSequence
@@ -192,7 +200,7 @@ async function createContainer() {
     logger
   });
 
-  // Initialize use cases - Preferences
+  // 9) Use cases - Preferences
   const getPreferencesUseCase = new GetPreferencesUseCase({
     preferencesRepository,
     logger
@@ -203,41 +211,54 @@ async function createContainer() {
     logger
   });
 
-  // Initialize retry scheduler if JetStream is disabled
+  // 10) Retry scheduler (only when JetStream disabled). Best-effort.
   let retryScheduler = null;
   const jetstreamEnabled = process.env.NATS_JETSTREAM_ENABLED === 'true';
   if (!jetstreamEnabled) {
-    const schedulerIntervalMs = parseInt(process.env.RETRY_SCHEDULER_INTERVAL_MS || '30000', 10);
-    retryScheduler = new RetryScheduler({
-      notificationRepository,
-      retryPendingUseCase,
-      logger,
-      intervalMs: schedulerIntervalMs
-    });
-    logger.info('RetryScheduler initialized (JetStream disabled)', { intervalMs: schedulerIntervalMs });
+    try {
+      const schedulerIntervalMs = parseInt(process.env.RETRY_SCHEDULER_INTERVAL_MS || '30000', 10);
+      retryScheduler = new RetryScheduler({
+        notificationRepository,
+        retryPendingUseCase,
+        logger,
+        intervalMs: schedulerIntervalMs
+      });
+      logger.info('RetryScheduler initialized (JetStream disabled)', { intervalMs: schedulerIntervalMs });
+    } catch (err) {
+      logger.warn('Failed to initialize RetryScheduler (continuing without it)', { error: err.message });
+    }
   }
 
   logger.info('Application container initialized successfully');
 
   return {
+    // Infra
     logger,
     metrics,
     mongoClient,
+    natsEventBus,
+    opaClient,
+    authVerifier,
+
+    // Repos
     notificationRepository,
     attemptRepository,
     templateRepository,
     preferencesRepository,
     inboxRepository,
-    natsEventBus,
+
+    // Channels
     channelSenders,
-    opaClient,
-    authVerifier,
+
+    // Use cases
     dispatchNotificationUseCase,
     retryPendingUseCase,
     renderTemplateUseCase,
     publishStatusUseCase,
     getPreferencesUseCase,
     updatePreferencesUseCase,
+
+    // Scheduler/config
     retryScheduler,
     backoffSequence
   };
@@ -248,16 +269,28 @@ async function closeContainer(container) {
 
   logger.info('Closing application container...');
 
-  if (retryScheduler) {
-    retryScheduler.stop();
+  try {
+    if (retryScheduler) {
+      retryScheduler.stop();
+    }
+  } catch (err) {
+    logger.warn('Error stopping RetryScheduler', { error: err.message });
   }
 
-  if (natsEventBus) {
-    await natsEventBus.close();
+  try {
+    if (natsEventBus) {
+      await natsEventBus.close();
+    }
+  } catch (err) {
+    logger.warn('Error closing NATS', { error: err.message });
   }
 
-  if (mongoClient) {
-    await mongoClient.close();
+  try {
+    if (mongoClient) {
+      await mongoClient.close();
+    }
+  } catch (err) {
+    logger.warn('Error closing MongoDB', { error: err.message });
   }
 
   logger.info('Application container closed');
