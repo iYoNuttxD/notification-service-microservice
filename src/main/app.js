@@ -10,10 +10,7 @@ function createApp(container) {
   const app = express();
   const logger = container.logger;
 
-  /**
-   * Security (Helmet)
-   * - CSP relaxado apenas para /api-docs (Swagger UI)
-   */
+  // Helmet com CSP relaxado só para /api-docs
   const helmetDefault = helmet();
   const helmetDocs = helmet({
     contentSecurityPolicy: {
@@ -33,16 +30,14 @@ function createApp(container) {
     return helmetDefault(req, res, next);
   });
 
-  /**
-   * CORS + Body parsing
-   */
+  // CORS
   app.use(cors());
+
+  // Body parsing
   app.use(express.json({ limit: '1mb' }));
   app.use(express.urlencoded({ extended: true }));
 
-  /**
-   * Rate limiting em /api/*
-   */
+  // Rate limiting em /api/*
   const limiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 100,
@@ -50,9 +45,7 @@ function createApp(container) {
   });
   app.use('/api/', limiter);
 
-  /**
-   * Request logging
-   */
+  // Request logging
   app.use((req, _res, next) => {
     logger.info('Incoming request', {
       method: req.method,
@@ -62,9 +55,7 @@ function createApp(container) {
     next();
   });
 
-  /**
-   * Raiz responde JSON (status 200)
-   */
+  // Raiz responde JSON (sem 404)
   app.get('/', (_req, res) => {
     res.status(200).json({
       service: 'Notification Service',
@@ -79,26 +70,17 @@ function createApp(container) {
     });
   });
 
-  /**
-   * Swagger UI / OpenAPI
-   * - /api-docs            -> HTML (200)
-   * - /api-docs/           -> HTML (200)
-   * - /api-docs/openapi.yaml -> YAML
-   * - assets em /api-docs/* servidos corretamente
-   */
+  // Swagger UI + Fallback
   const docsDir = path.resolve(__dirname, '../../docs');
   const openapiPath = path.join(docsDir, 'openapi.yaml');
 
   if (fs.existsSync(openapiPath)) {
-    // Serve o YAML da especificação
+    // YAML da spec
     app.get('/api-docs/openapi.yaml', (_req, res) => {
       res.sendFile(openapiPath);
     });
 
-    // Middleware estático do Swagger UI em /api-docs
-    app.use('/api-docs', swaggerUi.serve);
-
-    // Handler HTML do Swagger UI (sem redirect 301)
+    // Handler HTML do Swagger UI (200 em /api-docs e /api-docs/)
     const swaggerSetup = swaggerUi.setup(null, {
       swaggerOptions: {
         url: '/api-docs/openapi.yaml'
@@ -108,15 +90,18 @@ function createApp(container) {
     app.get('/api-docs', swaggerSetup);
     app.get('/api-docs/', swaggerSetup);
 
+    // Assets estáticos do Swagger UI (DEPOIS dos GETs pra evitar 301)
+    app.use('/api-docs', swaggerUi.serve);
+
     logger.info('Swagger UI available at /api-docs');
   } else {
     logger.warn('OpenAPI documentation file not found', { path: openapiPath });
 
-    // Fallback amigável (sem 404) para /api-docs
     const docsFallback = (_req, res) => {
       res.status(200).json({
         status: 'unavailable',
-        message: 'OpenAPI spec not found. Add docs/openapi.yaml to enable Swagger UI.',
+        message:
+          'OpenAPI spec not found. Add docs/openapi.yaml to enable Swagger UI.',
         expectedPath: openapiPath
       });
     };
@@ -133,9 +118,7 @@ function createApp(container) {
     });
   }
 
-  /**
-   * Feature routes
-   */
+  // Mount feature routes
   const systemRoutes = require('../features/system/http/routes');
   const notificationRoutes = require('../features/notifications/http/routes');
   const preferencesRoutes = require('../features/preferences/http/routes');
@@ -144,9 +127,7 @@ function createApp(container) {
   app.use('/api/v1', notificationRoutes(container));
   app.use('/api/v1', preferencesRoutes(container));
 
-  /**
-   * 404 handler
-   */
+  // 404 handler
   app.use((req, res) => {
     res.status(404).json({
       error: 'Not found',
@@ -154,9 +135,7 @@ function createApp(container) {
     });
   });
 
-  /**
-   * Error handler
-   */
+  // Error handler
   app.use((err, req, res, _next) => {
     logger.error('Unhandled error', {
       error: err.message,
