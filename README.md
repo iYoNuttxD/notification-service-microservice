@@ -92,6 +92,11 @@ O serviço segue os princípios de **Clean Architecture** com **Vertical Slice A
 
 O diagrama de arquitetura completo está disponível em [`C4Model3.drawio`](./C4Model3.drawio).
 
+**Referências de Arquitetura:**
+- Sistema de pedidos e entregas integrado com notificações multicanal
+- Arquitetura de microserviços com comunicação via NATS
+- Conformidade com padrões do ecossistema (orders-service, delivery-service)
+
 ---
 
 ## 🛠 Stack Tecnológica
@@ -158,6 +163,20 @@ Sistema de retentativa configurável com backoff exponencial:
 
 **SLA**: Tentativas por até 24 horas
 
+#### Retry Scheduler
+
+O serviço implementa duas estratégias de retry dependendo da configuração de JetStream:
+
+- **Com JetStream habilitado (`NATS_JETSTREAM_ENABLED=true`)**: Utiliza a redelivery nativa do JetStream
+- **Com JetStream desabilitado**: Executa um scheduler lightweight que periodicamente processa notificações pendentes
+
+O `RetryScheduler` verifica a cada 30 segundos (configurável via `RETRY_SCHEDULER_INTERVAL_MS`) por notificações com:
+- Status `RETRY` ou `QUEUED`
+- `nextAttemptAt <= now`
+
+Quando todas as tentativas são esgotadas, a notificação é enviada para o Dead Letter Queue (`notifications.dlq`).
+
+
 ### 4. Preferências de Usuário
 
 Controle granular de preferências por:
@@ -197,6 +216,36 @@ Restaurante: {{restaurantName}}
 - **OPA**: Autorização baseada em políticas (fail-open configurável)
 - **mTLS**: Suporte a mutual TLS (configurável)
 - **Rate Limiting**: 100 req/15min por IP
+- **PII Masking**: Mascaramento automático de emails, telefones e device tokens em logs
+
+### 9. Índices e TTL
+
+O serviço garante a criação automática de índices no startup através da função `ensureIndexes()`:
+
+**Notifications:**
+- `status + createdAt` (para queries de retry)
+- `recipient.userId` (para busca por usuário)
+- `idempotencyKey` (único, para dedupe)
+- `metadata.orderId` (para rastreamento)
+- `createdAt` com TTL de 90 dias (RETENTION_DAYS)
+
+**Attempts:**
+- `notificationId` (para buscar tentativas de uma notificação)
+- `channel + provider` (para métricas)
+- `startedAt` com TTL de 90 dias
+
+**Inbox:**
+- `eventId` (único, para dedupe)
+- `processedAt` com TTL configurável (NOTIF_DEDUP_WINDOW_SEC)
+
+**Templates:**
+- `key + channel + locale` (único)
+
+**Preferences:**
+- `_id` (userId)
+- `updatedAt`
+
+Todos os índices são criados de forma idempotente, seguro para múltiplas execuções.
 
 ---
 
@@ -228,26 +277,35 @@ notification-service-microservice/
 │   │   │   ├── push/                # FCM sender
 │   │   │   ├── opa/                 # OPA client
 │   │   │   └── auth/                # JWT verifier
+│   │   ├── scheduler/
+│   │   │   └── RetryScheduler.js    # Retry scheduler (quando JetStream desabilitado)
+│   │   ├── db/
+│   │   │   └── ensureIndexes.js     # Criação centralizada de índices
 │   │   └── utils/
 │   │       ├── logger.js            # Winston logger
 │   │       ├── metrics.js           # Prometheus metrics
-│   │       └── backoff.js           # Backoff utilities
+│   │       ├── backoff.js           # Backoff utilities
+│   │       └── pii.js               # PII masking utilities
 │   │
 │   ├── features/                    # Vertical slices
 │   │   ├── notifications/
 │   │   │   ├── http/                # Controllers & routes
 │   │   │   │   └── routes.js
 │   │   │   └── use-cases/           # Business logic
-│   │   │       └── DispatchNotificationUseCase.js
+│   │   │       ├── DispatchNotificationUseCase.js
+│   │   │       ├── RetryPendingUseCase.js
+│   │   │       ├── RenderTemplateUseCase.js
+│   │   │       └── PublishStatusUseCase.js
 │   │   ├── preferences/
 │   │   │   ├── http/
 │   │   │   │   └── routes.js
 │   │   │   └── use-cases/
-│   │   └── system/
+│   │   └── system/                  # System endpoints
 │   │       └── http/
+│   │           └── routes.js        # Health, metrics
 │   │
 │   └── main/                        # Entry point
-│       ├── app.js                   # Express app
+│       ├── app.js                   # Express app with Swagger
 │       ├── container.js             # DI container
 │       ├── subscribers.js           # NATS subscribers
 │       └── server.js                # Main server
@@ -261,10 +319,14 @@ notification-service-microservice/
 │   └── schemas/                     # JSON schemas
 │       └── event.schema.json
 │
+├── scripts/
+│   └── seedTemplates.js             # Script para popular templates padrão
+│
 ├── .github/
 │   └── workflows/
 │       └── docker-build-and-publish.yml
 │
+├── C4Model3.drawio                  # Diagrama C4 de arquitetura
 ├── docker-compose.dev.yml           # Docker Compose para dev
 ├── Dockerfile                       # Dockerfile de produção
 ├── .env.example                     # Exemplo de configuração
@@ -313,11 +375,13 @@ docker-compose -f docker-compose.dev.yml up -d
 
 Serviços disponíveis:
 - **API**: http://localhost:3003
-- **API Docs**: http://localhost:3003/api-docs
+- **Swagger UI**: http://localhost:3003/api-docs
 - **Health**: http://localhost:3003/api/v1/health
 - **Metrics**: http://localhost:3003/api/v1/metrics
 - **MongoDB**: localhost:27017
 - **NATS**: localhost:4222
+
+**Nota sobre Swagger UI**: O Swagger UI está configurado com CSP relaxado apenas para a rota `/api-docs`. Todas as outras rotas mantêm configurações de segurança estritas do Helmet.
 
 5. **Teste a API**
 
@@ -541,14 +605,25 @@ Para locadores e entregadores quando uma locação de veículo é iniciada.
 
 Templates suportam variáveis Handlebars baseadas no campo `data` do evento.
 
+### Seed Templates
+
+O serviço pode popular automaticamente os templates padrão no startup configurando `SEED_TEMPLATES=true` no `.env`. Isso garante que os templates essenciais estejam disponíveis sem necessidade de configuração manual.
+
+Você também pode executar o script manualmente:
+```bash
+node scripts/seedTemplates.js
+```
+
 ---
 
 ## 🔌 API Endpoints
 
-### System
+### System Slice
+
+O sistema fornece endpoints de monitoramento e documentação através do slice `system`:
 
 #### `GET /api/v1/health`
-Health check do serviço.
+Health check do serviço - não requer autenticação.
 
 **Resposta:**
 ```json
@@ -602,6 +677,31 @@ Lista notificações com filtros.
 - `eventType`: Tipo do evento
 - `from`, `to`: Filtro por data
 - `page`, `limit`: Paginação
+
+#### `DELETE /api/v1/notifications/user/:userId`
+Remove todos os dados relacionados ao usuário (LGPD/GDPR compliance).
+
+**Autenticação:** JWT Bearer token (apenas admin)
+
+**Resposta:**
+```json
+{
+  "success": true,
+  "message": "User data deleted successfully",
+  "deleted": {
+    "notifications": 10,
+    "attempts": 25,
+    "preferences": 1,
+    "inbox": 0
+  }
+}
+```
+
+Este endpoint remove:
+- Todas as notificações do usuário
+- Todas as tentativas de envio relacionadas
+- Preferências do usuário
+- Registros de inbox (se houver)
 
 ### Preferences
 
@@ -678,20 +778,22 @@ Disponíveis em `/api/v1/metrics`:
 
 | Métrica | Tipo | Descrição |
 |---------|------|-----------|
-| `notifications_received_total` | Counter | Total de eventos recebidos |
-| `notifications_dispatched_total` | Counter | Total de notificações despachadas |
+| `notifications_received_total` | Counter | Total de eventos recebidos por tipo |
+| `notifications_dispatched_total` | Counter | Total de notificações despachadas por canal/provider |
 | `notifications_sent_total` | Counter | Total de notificações enviadas com sucesso |
-| `notifications_failed_total` | Counter | Total de falhas |
-| `notifications_attempt_duration_seconds` | Histogram | Duração das tentativas |
-| `notifications_inflight` | Gauge | Notificações sendo processadas |
-| `dedupe_hits_total` | Counter | Eventos duplicados detectados |
-| `provider_rate_limited_total` | Counter | Rate limits de providers |
+| `notifications_failed_total` | Counter | Total de falhas por canal/provider/errorCode |
+| `notifications_attempt_duration_seconds` | Histogram | Duração das tentativas de envio |
+| `notifications_inflight` | Gauge | Notificações sendo processadas no momento |
+| `dedupe_hits_total` | Counter | Eventos duplicados detectados via idempotency |
+| `provider_rate_limited_total` | Counter | Rate limits recebidos dos providers |
+
+Cada métrica inclui labels relevantes como `channel`, `provider`, `status`, `errorCode` para análise detalhada.
 
 ### Logging
 
 Winston com:
 - Formato JSON em produção
-- Mascaramento automático de PII (email, telefone)
+- Mascaramento automático de PII (email, telefone, device tokens)
 - Propagação de `correlationId` e `traceId`
 
 ---
@@ -783,8 +885,11 @@ spec:
 ### Executar Testes
 
 ```bash
-# Todos os testes
+# Testes unitários (padrão)
 npm test
+
+# Testes de integração (requer MongoDB e NATS rodando)
+npm run test:integration
 
 # Com coverage
 npm run test:coverage
@@ -796,7 +901,19 @@ npm run test:watch
 ### Estrutura de Testes
 
 - **Unit**: Entidades, use cases e adapters isolados
-- **Integration**: Testes com MongoDB e NATS reais
+- **Integration**: Testes com MongoDB e NATS reais (em `tests/integration/`)
+  - Dispatch básico de notificações
+  - Fallback entre canais (push → email)
+  - Deduplicação/idempotência
+  - Retry com sucesso após falha inicial
+  - Exclusão de dados por userId (LGPD)
+
+**Nota**: Testes de integração são ignorados por padrão e requerem MongoDB e NATS em execução. Execute com `npm run test:integration` após iniciar os serviços:
+
+```bash
+docker-compose -f docker-compose.dev.yml up -d mongo nats
+npm run test:integration
+```
 
 ---
 
@@ -806,16 +923,39 @@ npm run test:watch
 
 O serviço implementa práticas LGPD-friendly:
 
-1. **Mascaramento de PII**: Logs automáticos mascarados
-2. **Retenção de Dados**: TTL de 90 dias
-3. **Direito ao Esquecimento**: Endpoint para deletar dados de usuário
+1. **Mascaramento de PII**: Logs automaticamente mascarados usando `maskEmail()`, `maskPhone()` e `maskDeviceToken()`
+2. **Retenção de Dados**: TTL de 90 dias (configurável via `RETENTION_DAYS`)
+3. **Direito ao Esquecimento**: Endpoint REST para deletar todos os dados do usuário
 
 ### Deletar Dados do Usuário
 
-```javascript
-// Implementado no repository
-await notificationRepository.deleteByUserId(userId);
+O endpoint `DELETE /api/v1/notifications/user/:userId` (apenas admin) remove todos os dados relacionados:
+
+```bash
+curl -X DELETE http://localhost:3003/api/v1/notifications/user/user-123 \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}"
 ```
+
+**Resposta:**
+```json
+{
+  "success": true,
+  "message": "User data deleted successfully",
+  "deleted": {
+    "notifications": 15,
+    "attempts": 42,
+    "preferences": 1,
+    "inbox": 0
+  }
+}
+```
+
+Coleções afetadas:
+- `notifications`: Todas as notificações do usuário
+- `attempts`: Todas as tentativas relacionadas às notificações do usuário
+- `preferences`: Preferências de notificação do usuário
+- `inbox`: Registros de deduplicação (quando aplicável)
+
 
 ---
 
