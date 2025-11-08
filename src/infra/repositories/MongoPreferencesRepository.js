@@ -8,7 +8,7 @@ class MongoPreferencesRepository {
   async init() {
     const db = this.client.db(this.dbName);
     this.collection = db.collection('preferences');
-    // Removido: índices agora criados centralmente em ensureIndexes().
+    // Index creation centralized in ensureIndexes()
   }
 
   async findByUserId(userId) {

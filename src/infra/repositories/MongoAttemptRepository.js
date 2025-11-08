@@ -1,3 +1,5 @@
+const { MongoClient } = require('mongodb');
+
 class MongoAttemptRepository {
   constructor(mongoClient, dbName) {
     this.client = mongoClient;
@@ -8,7 +10,7 @@ class MongoAttemptRepository {
   async init() {
     const db = this.client.db(this.dbName);
     this.collection = db.collection('attempts');
-    // Removido: índices agora criados centralmente em ensureIndexes().
+    // Index creation centralized in ensureIndexes()
   }
 
   async save(attempt) {
