@@ -10,7 +10,7 @@ function createApp(container) {
   const app = express();
   const logger = container.logger;
 
-  // Helmet com CSP relaxado só para /api-docs
+  // Helmet: CSP relaxado só para /api-docs
   const helmetDefault = helmet();
   const helmetDocs = helmet({
     contentSecurityPolicy: {
@@ -55,7 +55,7 @@ function createApp(container) {
     next();
   });
 
-  // Raiz responde JSON (sem 404)
+  // Raiz responde JSON
   app.get('/', (_req, res) => {
     res.status(200).json({
       service: 'Notification Service',
@@ -70,28 +70,32 @@ function createApp(container) {
     });
   });
 
-  // Swagger UI + Fallback
+  // Swagger UI / OpenAPI
   const docsDir = path.resolve(__dirname, '../../docs');
   const openapiPath = path.join(docsDir, 'openapi.yaml');
 
   if (fs.existsSync(openapiPath)) {
-    // YAML da spec
+    // Serve o YAML
     app.get('/api-docs/openapi.yaml', (_req, res) => {
       res.sendFile(openapiPath);
     });
 
-    // Handler HTML do Swagger UI (200 em /api-docs e /api-docs/)
-    const swaggerSetup = swaggerUi.setup(null, {
+    // HTML do Swagger UI em /api-docs e /api-docs/
+    const swaggerHandler = swaggerUi.setup(null, {
       swaggerOptions: {
         url: '/api-docs/openapi.yaml'
       }
     });
 
-    app.get('/api-docs', swaggerSetup);
-    app.get('/api-docs/', swaggerSetup);
+    app.get('/api-docs', swaggerHandler);
+    app.get('/api-docs/', swaggerHandler);
 
-    // Assets estáticos do Swagger UI (DEPOIS dos GETs pra evitar 301)
+    // Assets do Swagger em /api-docs/*
     app.use('/api-docs', swaggerUi.serve);
+
+    // Hack seguro: também servir assets na raiz para quando o HTML resolver ./ como /
+    // (evita MIME application/json nos /swagger-ui-*.js/css)
+    app.use('/', swaggerUi.serve);
 
     logger.info('Swagger UI available at /api-docs');
   } else {
@@ -118,7 +122,7 @@ function createApp(container) {
     });
   }
 
-  // Mount feature routes
+  // Feature routes
   const systemRoutes = require('../features/system/http/routes');
   const notificationRoutes = require('../features/notifications/http/routes');
   const preferencesRoutes = require('../features/preferences/http/routes');
