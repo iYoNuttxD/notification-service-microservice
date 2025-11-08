@@ -10,21 +10,8 @@ class MongoNotificationRepository {
   async init() {
     const db = this.client.db(this.dbName);
     this.collection = db.collection('notifications');
-
-    // Create indexes
-    await this.collection.createIndex({ status: 1, createdAt: 1 });
-    await this.collection.createIndex({ 'recipient.userId': 1 });
-    await this.collection.createIndex({ idempotencyKey: 1 }, { unique: true, sparse: true });
-    await this.collection.createIndex({ 'metadata.orderId': 1 }, { sparse: true });
-    await this.collection.createIndex({ eventId: 1 });
-    await this.collection.createIndex({ nextAttemptAt: 1 }, { sparse: true });
-
-    // TTL index
-    const retentionDays = parseInt(process.env.RETENTION_DAYS || '90', 10);
-    await this.collection.createIndex(
-      { createdAt: 1 },
-      { expireAfterSeconds: retentionDays * 24 * 60 * 60 }
-    );
+    // Removido: criação de índices duplicada.
+    // Todos os índices (incluindo TTL) já são garantidos por ensureIndexes() no container.
   }
 
   async save(notification) {
@@ -85,12 +72,8 @@ class MongoNotificationRepository {
 
     if (filters.from || filters.to) {
       query.createdAt = {};
-      if (filters.from) {
-        query.createdAt.$gte = new Date(filters.from);
-      }
-      if (filters.to) {
-        query.createdAt.$lte = new Date(filters.to);
-      }
+      if (filters.from) query.createdAt.$gte = new Date(filters.from);
+      if (filters.to) query.createdAt.$lte = new Date(filters.to);
     }
 
     const page = parseInt(filters.page || '1', 10);
