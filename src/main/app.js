@@ -11,7 +11,7 @@ function createApp(container) {
   const app = express();
   const logger = container.logger;
 
-  // Helmet (CSP relaxado somente para /api-docs)
+  // Helmet (CSP relaxado só para /api-docs)
   app.use((req, res, next) => {
     if (req.path.startsWith('/api-docs')) {
       helmet({
@@ -54,7 +54,7 @@ function createApp(container) {
     next();
   });
 
-  // / raiz informativa
+  // Raiz informativa (sem 404)
   app.get('/', (_req, res) => {
     res.status(200).json({
       service: 'Notification Service',
@@ -69,36 +69,38 @@ function createApp(container) {
     });
   });
 
-  // Swagger UI (padrão). Se não houver spec ou falhar parse → fallback HTML.
+  // Swagger UI
   const openapiPath = path.resolve(__dirname, '../../docs/openapi.yaml');
-  let swaggerMounted = false;
+  let spec = null;
 
   if (fs.existsSync(openapiPath)) {
     try {
-      const raw = fs.readFileSync(openapiPath, 'utf8');
-      const doc = YAML.parse(raw);
-      app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(doc, {
-        customSiteTitle: 'Notification Service API Docs',
-        swaggerOptions: {
-          docExpansion: 'none'
-        }
-      }));
-      swaggerMounted = true;
-      logger.info('Swagger UI mounted with spec at /api-docs');
+      spec = YAML.parse(fs.readFileSync(openapiPath, 'utf8'));
+      logger.info('OpenAPI spec loaded', { path: openapiPath });
     } catch (err) {
-      logger.warn('Failed to parse OpenAPI spec, mounting fallback UI', { error: err.message });
+      logger.warn('Failed to parse OpenAPI spec, using fallback UI', { error: err.message });
     }
   } else {
-    logger.warn('OpenAPI spec file not found, mounting fallback UI', { path: openapiPath });
+    logger.warn('OpenAPI spec not found, using fallback UI', { path: openapiPath });
   }
 
-  if (!swaggerMounted) {
-    // Monta apenas static serve para evitar 404 de assets e fornece HTML fallback simples
-    app.use('/api-docs', swaggerUi.serve);
-    app.get('/api-docs', (_req, res) => {
-      res
-        .status(200)
-        .send(`<!DOCTYPE html>
+  if (spec) {
+    // Handler explícito para devolver 200 em /api-docs e /api-docs/ sem 301
+    const uiHandler = (req, res, next) => {
+      const handler = swaggerUi.setup(spec, {
+        customSiteTitle: 'Notification Service API Docs',
+        swaggerOptions: { docExpansion: 'none' }
+      });
+      handler(req, res, next);
+    };
+    app.get('/api-docs', uiHandler);
+    app.get('/api-docs/', uiHandler);
+
+    // Assets do Swagger servidos em /api-docs/... (note a barra final no mount)
+    app.use('/api-docs/', swaggerUi.serve);
+  } else {
+    // Fallback HTML simples (não referencia assets do Swagger)
+    const fallbackHtml = `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8"/>
@@ -120,10 +122,15 @@ function createApp(container) {
       <li>Reimplantar o serviço.</li>
     </ol>
   </div>
-  <p>Endpoint esperado do spec: <code>${openapiPath}</code></p>
+  <p>Esperado em: <code>${openapiPath}</code></p>
 </body>
-</html>`);
-    });
+</html>`;
+    const fallbackHandler = (_req, res) => res.status(200).send(fallbackHtml);
+    app.get('/api-docs', fallbackHandler);
+    app.get('/api-docs/', fallbackHandler);
+
+    // Opcional: servir static para evitar 404 de assets caso alguém force o HTML antigo
+    app.use('/api-docs/', swaggerUi.serve);
   }
 
   // Rotas de features
