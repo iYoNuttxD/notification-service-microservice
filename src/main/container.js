@@ -89,6 +89,38 @@ async function createContainer() {
     from: process.env.EMAIL_FROM || 'notifications@clickdelivery.com.br'
   }, logger, metrics);
 
+  let smsSender = null;
+  const haveTwilioCreds = process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_FROM;
+  if (haveTwilioCreds) {
+    smsSender = new TwilioSmsSender({
+      accountSid: process.env.TWILIO_ACCOUNT_SID,
+      authToken: process.env.TWILIO_AUTH_TOKEN,
+      from: process.env.TWILIO_FROM
+    }, logger, metrics);
+    logger.info('Twilio SMS sender initialized');
+  } else {
+    logger.info('Twilio credentials not provided - SMS channel disabled');
+  }
+
+  let pushSender = null;
+  const haveFcmCreds = process.env.FCM_PROJECT_ID && process.env.FCM_CLIENT_EMAIL && process.env.FCM_PRIVATE_KEY;
+  if (haveFcmCreds) {
+    pushSender = new FcmPushSender({
+      projectId: process.env.FCM_PROJECT_ID,
+      clientEmail: process.env.FCM_CLIENT_EMAIL,
+      privateKey: process.env.FCM_PRIVATE_KEY
+    }, logger, metrics);
+    logger.info('FCM push sender initialized');
+  } else {
+    logger.info('FCM credentials not provided - Push channel disabled');
+  }
+
+  const channelSenders = {
+    email: emailSender
+  };
+  if (smsSender) channelSenders.sms = smsSender;
+  if (pushSender) channelSenders.push = pushSender;
+
   const smsSender = new TwilioSmsSender({
     accountSid: process.env.TWILIO_ACCOUNT_SID,
     authToken: process.env.TWILIO_AUTH_TOKEN,
