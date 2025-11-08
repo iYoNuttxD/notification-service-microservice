@@ -8,22 +8,32 @@ class MongoInboxRepository {
   async init() {
     const db = this.client.db(this.dbName);
     this.collection = db.collection('inbox');
-    // Removido: índices via ensureIndexes().
+    // Index creation centralized in ensureIndexes()
   }
 
   async isProcessed(eventId) {
-    return (await this.collection.findOne({ eventId })) !== null;
+    const doc = await this.collection.findOne({ eventId });
+    return doc !== null;
   }
 
   async markProcessed(eventId) {
-    await this.collection.insertOne({
-      eventId,
-      processedAt: new Date()
-    });
+    try {
+      await this.collection.insertOne({
+        eventId,
+        processedAt: new Date()
+      });
+      return true;
+    } catch (error) {
+      if (error.code === 11000) {
+        // Duplicate key error - already processed
+        return false;
+      }
+      throw error;
+    }
   }
 
   async deleteByUserId(_userId) {
-    // (Caso queira implementar limpeza por user, ajustar aqui)
+    // No-op for now (userId isn't stored in inbox)
     return 0;
   }
 }
