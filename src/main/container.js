@@ -65,7 +65,8 @@ async function createContainer() {
   // Seed templates if enabled
   if (process.env.SEED_TEMPLATES === 'true') {
     logger.info('Seeding default templates...');
-    await templateRepository.seedDefaults();
+    const seedResult = await templateRepository.seedDefaults();
+    logger.info('Template seeding completed', seedResult);
   }
 
   // Initialize NATS

@@ -1,5 +1,6 @@
 const twilio = require('twilio');
 const handlebars = require('handlebars');
+const { maskPhone } = require('../../utils/pii');
 
 class TwilioSmsSender {
   constructor(config, logger, metrics) {
@@ -29,6 +30,19 @@ class TwilioSmsSender {
         throw new Error('No phone number provided');
       }
 
+      // SMS prioritized for deliverers
+      if (notification.recipient.role !== 'deliverer') {
+        this.logger.debug('SMS skipped - not a deliverer', {
+          notificationId: notification.id,
+          role: notification.recipient.role
+        });
+        return {
+          success: false,
+          error: 'SMS only enabled for deliverers',
+          errorCode: 'SMS_ROLE_RESTRICTED'
+        };
+      }
+
       // Render template
       const bodyTemplate = handlebars.compile(template.body);
       const body = bodyTemplate(notification.metadata);
@@ -37,7 +51,7 @@ class TwilioSmsSender {
 
       if (this.mockMode) {
         this.logger.info('MOCK: SMS would be sent', {
-          to: this.maskPhone(notification.recipient.phone),
+          to: maskPhone(notification.recipient.phone),
           body: body.substring(0, 50),
           correlationId: notification.correlationId
         });
@@ -59,7 +73,7 @@ class TwilioSmsSender {
 
       this.logger.info('SMS sent successfully', {
         notificationId: notification.id,
-        to: this.maskPhone(notification.recipient.phone),
+        to: maskPhone(notification.recipient.phone),
         messageSid: message.sid,
         correlationId: notification.correlationId
       });
@@ -69,7 +83,6 @@ class TwilioSmsSender {
         providerMessageId: message.sid
       };
     } catch (error) {
-      const duration = Date.now() - startTime;
       this.metrics.recordFailed('sms', 'twilio', error.message);
 
       this.logger.error('SMS send failed', {
@@ -85,12 +98,6 @@ class TwilioSmsSender {
         errorCode: error.code || 'SMS_SEND_FAILED'
       };
     }
-  }
-
-  maskPhone(phone) {
-    if (!phone) return '';
-    if (phone.length < 4) return '***';
-    return phone.substring(0, 3) + '***' + phone.substring(phone.length - 2);
   }
 }
 

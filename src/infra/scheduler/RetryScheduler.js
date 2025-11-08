@@ -1,6 +1,6 @@
 /**
  * RetryScheduler
- * 
+ *
  * Periodically checks for notifications that need to be retried when NATS JetStream is disabled.
  * Fetches notifications with status RETRY or QUEUED that have nextAttemptAt <= now and processes them.
  */

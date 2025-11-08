@@ -119,9 +119,22 @@ class MongoTemplateRepository {
       })
     ];
 
+    let inserted = 0;
+    let skipped = 0;
+
     for (const template of defaultTemplates) {
+      // Check if template already exists
+      const existing = await this.findByKey(template.templateKey, template.channel, template.locale);
+      if (existing) {
+        skipped++;
+        continue;
+      }
+
       await this.save(template);
+      inserted++;
     }
+
+    return { inserted, skipped, total: defaultTemplates.length };
   }
 }
 

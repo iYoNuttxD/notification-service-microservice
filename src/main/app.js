@@ -51,7 +51,7 @@ function createApp(container) {
   });
 
   // Error handler
-  app.use((err, req, res, next) => {
+  app.use((err, req, res, _next) => {
     logger.error('Unhandled error', {
       error: err.message,
       stack: err.stack,

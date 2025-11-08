@@ -61,11 +61,9 @@ class RetryPendingUseCase {
       }
 
       // Try each channel
-      let sent = false;
       for (const channel of channelsToRetry) {
         const result = await this.retryChannel(notification, channel, attempts);
         if (result.success) {
-          sent = true;
           notification.updateStatus('SENT');
           await this.notificationRepository.update(notification);
           await this.publishStatusUpdate(notification, result.attempt);

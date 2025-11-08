@@ -1,5 +1,6 @@
 const nodemailer = require('nodemailer');
 const handlebars = require('handlebars');
+const { maskEmail } = require('../../utils/pii');
 
 class SendGridEmailSender {
   constructor(config, logger, metrics) {
@@ -43,7 +44,7 @@ class SendGridEmailSender {
 
       const subject = subjectTemplate(notification.metadata);
       const html = bodyTemplate(notification.metadata);
-      
+
       // For text version, use the rendered HTML as-is since our templates are plain text friendly
       // In production, consider using a proper HTML-to-text library if templates contain HTML
       const text = html;
@@ -52,7 +53,7 @@ class SendGridEmailSender {
 
       if (this.mockMode) {
         this.logger.info('MOCK: Email would be sent', {
-          to: this.maskEmail(notification.recipient.email),
+          to: maskEmail(notification.recipient.email),
           subject,
           correlationId: notification.correlationId
         });
@@ -83,7 +84,7 @@ class SendGridEmailSender {
 
       this.logger.info('Email sent successfully', {
         notificationId: notification.id,
-        to: this.maskEmail(notification.recipient.email),
+        to: maskEmail(notification.recipient.email),
         messageId: info.messageId,
         correlationId: notification.correlationId
       });
@@ -93,7 +94,6 @@ class SendGridEmailSender {
         providerMessageId: info.messageId
       };
     } catch (error) {
-      const duration = Date.now() - startTime;
       this.metrics.recordFailed('email', 'sendgrid', error.message);
 
       this.logger.error('Email send failed', {
@@ -108,14 +108,6 @@ class SendGridEmailSender {
         errorCode: error.code || 'EMAIL_SEND_FAILED'
       };
     }
-  }
-
-  maskEmail(email) {
-    if (!email) return '';
-    const [username, domain] = email.split('@');
-    if (!domain) return email;
-    const maskedUsername = username.charAt(0) + '***' + username.charAt(username.length - 1);
-    return `${maskedUsername}@${domain}`;
   }
 }
 
