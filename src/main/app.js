@@ -3,7 +3,6 @@ const helmet = require('helmet');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const swaggerUi = require('swagger-ui-express');
-const YAML = require('yaml');
 const fs = require('fs');
 const path = require('path');
 
@@ -11,7 +10,7 @@ function createApp(container) {
   const app = express();
   const logger = container.logger;
 
-  // Configure Helmet with relaxed CSP for Swagger UI
+  // Helmet com CSP relaxado apenas para /api-docs
   app.use((req, res, next) => {
     if (req.path.startsWith('/api-docs')) {
       helmet({
@@ -28,6 +27,7 @@ function createApp(container) {
       helmet()(req, res, next);
     }
   });
+
   app.use(cors());
 
   // Body parsing
@@ -43,7 +43,7 @@ function createApp(container) {
   app.use('/api/', limiter);
 
   // Request logging
-  app.use((req, res, next) => {
+  app.use((req, _res, next) => {
     logger.info('Incoming request', {
       method: req.method,
       path: req.path,
@@ -52,39 +52,49 @@ function createApp(container) {
     next();
   });
 
-  // Swagger documentation at /api-docs with fallback
-  try {
-    const openapiPath = path.resolve(__dirname, '../../docs/openapi.yaml');
-    if (fs.existsSync(openapiPath)) {
-      const openapiDoc = YAML.parse(fs.readFileSync(openapiPath, 'utf8'));
-      app.use('/api-docs', swaggerUi.serve);
-      app.get('/api-docs', swaggerUi.setup(openapiDoc));
-      logger.info('Swagger UI available at /api-docs');
-    } else {
-      logger.warn('OpenAPI documentation file not found', { path: openapiPath });
-      app.get('/api-docs', (_req, res) => {
-        res.status(200).json({
-          status: 'unavailable',
-          message: 'OpenAPI spec not found. Add docs/openapi.yaml to enable Swagger UI.',
-          expectedPath: path.resolve(__dirname, '../../docs/openapi.yaml')
-        });
-      });
-    }
-  } catch (error) {
-    logger.warn('Failed to load OpenAPI documentation', { error: error.message });
-    app.get('/api-docs', (_req, res) => {
-      res.status(200).json({
-        status: 'unavailable',
-        message: 'Failed to load OpenAPI spec due to an error.',
-        error: error.message
-      });
-    });
-  }
-
-  // Redirect root to /api-docs to avoid 404 confusion
+  // Redirect root → /api-docs para evitar 404 no "/"
   app.get('/', (_req, res) => {
     res.redirect(302, '/api-docs');
   });
+
+  // Swagger em /api-docs
+  // NÃO parseia o YAML no servidor — serve o arquivo e a UI aponta para a URL
+  const docsDir = path.resolve(__dirname, '../../docs');
+  const openapiPath = path.join(docsDir, 'openapi.yaml');
+
+  if (fs.existsSync(openapiPath)) {
+    // Servir o YAML diretamente
+    app.get('/api-docs/openapi.yaml', (_req, res) => {
+      res.sendFile(openapiPath);
+    });
+
+    // Montar Swagger UI apontando para a URL do YAML
+    app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(null, {
+      swaggerOptions: { url: '/api-docs/openapi.yaml' }
+    }));
+
+    logger.info('Swagger UI available at /api-docs');
+  } else {
+    logger.warn('OpenAPI documentation file not found', { path: openapiPath });
+
+    // Fallback informativo em /api-docs
+    app.get('/api-docs', (_req, res) => {
+      res.status(200).json({
+        status: 'unavailable',
+        message: 'OpenAPI spec not found. Add docs/openapi.yaml to enable Swagger UI.',
+        expectedPath: openapiPath
+      });
+    });
+
+    // Fallback para a URL do YAML (evita 404)
+    app.get('/api-docs/openapi.yaml', (_req, res) => {
+      res.status(200).json({
+        status: 'unavailable',
+        message: 'OpenAPI spec not found at expected path.',
+        expectedPath: openapiPath
+      });
+    });
+  }
 
   // Mount feature routes
   const systemRoutes = require('../features/system/http/routes');
