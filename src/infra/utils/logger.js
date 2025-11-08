@@ -1,4 +1,5 @@
 const winston = require('winston');
+const { maskEmail, maskPhone } = require('./pii');
 
 function createLogger() {
   const logLevel = process.env.LOG_LEVEL || 'info';
@@ -48,20 +49,6 @@ function createLogger() {
   });
 
   return logger;
-}
-
-function maskEmail(email) {
-  if (!email) return '';
-  const [username, domain] = email.split('@');
-  if (!domain) return email;
-  const maskedUsername = username.charAt(0) + '***' + username.charAt(username.length - 1);
-  return `${maskedUsername}@${domain}`;
-}
-
-function maskPhone(phone) {
-  if (!phone) return '';
-  if (phone.length < 4) return '***';
-  return phone.substring(0, 3) + '***' + phone.substring(phone.length - 2);
 }
 
 module.exports = { createLogger };

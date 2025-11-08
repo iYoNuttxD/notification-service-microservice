@@ -211,6 +211,57 @@ paths:
         '404':
           description: Notificação não encontrada
 
+  /notifications/user/{userId}:
+    delete:
+      tags:
+        - Notifications
+      summary: Deletar todos os dados do usuário (LGPD/GDPR)
+      description: |
+        Remove todos os dados relacionados ao usuário do sistema para conformidade com LGPD/GDPR.
+        Inclui: notificações, tentativas, preferências.
+        **Apenas administradores podem executar esta operação.**
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          description: ID do usuário cujos dados serão deletados
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Dados do usuário deletados com sucesso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: User data deleted successfully
+                  deletionResults:
+                    type: object
+                    properties:
+                      notifications:
+                        type: integer
+                        description: Número de notificações deletadas
+                      attempts:
+                        type: integer
+                        description: Número de tentativas deletadas
+                      preferences:
+                        type: integer
+                        description: Número de registros de preferências deletados
+        '400':
+          description: userId é obrigatório
+        '403':
+          description: Acesso negado - Apenas administradores
+        '500':
+          description: Erro interno do servidor
+
   /preferences/{userId}:
     get:
       tags:
@@ -321,6 +372,57 @@ components:
         updatedAt:
           type: string
           format: date-time
+
+    Attempt:
+      type: object
+      description: Representa uma tentativa de envio de notificação por um canal específico
+      properties:
+        id:
+          type: string
+          description: ID único da tentativa
+        notificationId:
+          type: string
+          description: ID da notificação relacionada
+        channel:
+          type: string
+          enum: [push, email, sms]
+          description: Canal utilizado nesta tentativa
+        provider:
+          type: string
+          enum: [fcm, sendgrid, twilio]
+          description: Provedor utilizado para envio
+        status:
+          type: string
+          enum: [PENDING, SUCCESS, FAILED]
+          description: Status da tentativa
+        providerMessageId:
+          type: string
+          nullable: true
+          description: ID da mensagem retornado pelo provedor (ex: FCM message ID, SendGrid message ID, Twilio SID)
+        error:
+          type: string
+          nullable: true
+          description: Mensagem de erro caso a tentativa tenha falhado
+        errorCode:
+          type: string
+          nullable: true
+          description: Código de erro específico do provedor ou categoria de erro
+        attemptNumber:
+          type: integer
+          description: Número sequencial da tentativa para este canal
+        startedAt:
+          type: string
+          format: date-time
+          description: Data/hora de início da tentativa
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Data/hora de conclusão da tentativa
+        durationMs:
+          type: integer
+          nullable: true
+          description: Duração da tentativa em milissegundos
 
     Preferences:
       type: object

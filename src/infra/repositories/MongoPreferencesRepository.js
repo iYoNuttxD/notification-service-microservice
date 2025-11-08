@@ -33,6 +33,11 @@ class MongoPreferencesRepository {
 
     return preferences;
   }
+
+  async deleteByUserId(userId) {
+    const result = await this.collection.deleteOne({ _id: userId });
+    return result.deletedCount;
+  }
 }
 
 module.exports = MongoPreferencesRepository;

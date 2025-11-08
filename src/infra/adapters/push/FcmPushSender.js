@@ -101,7 +101,6 @@ class FcmPushSender {
         providerMessageId: messageId
       };
     } catch (error) {
-      const duration = Date.now() - startTime;
       this.metrics.recordFailed('push', 'fcm', error.message);
 
       this.logger.error('Push notification send failed', {

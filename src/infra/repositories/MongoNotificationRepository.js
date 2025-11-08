@@ -132,7 +132,8 @@ class MongoNotificationRepository {
   }
 
   async deleteByUserId(userId) {
-    await this.collection.deleteMany({ 'recipient.userId': userId });
+    const result = await this.collection.deleteMany({ 'recipient.userId': userId });
+    return result.deletedCount;
   }
 }
 
