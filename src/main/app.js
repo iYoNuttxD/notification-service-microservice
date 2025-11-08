@@ -10,7 +10,7 @@ function createApp(container) {
   const app = express();
   const logger = container.logger;
 
-  // Helmet com CSP relaxado apenas para /api-docs
+  // Helmet (CSP relaxado só para /api-docs)
   app.use((req, res, next) => {
     if (req.path.startsWith('/api-docs')) {
       helmet({
@@ -52,32 +52,38 @@ function createApp(container) {
     next();
   });
 
-  // Redirect root → /api-docs para evitar 404 no "/"
+  // Redirect root → /api-docs
   app.get('/', (_req, res) => {
     res.redirect(302, '/api-docs');
   });
 
-  // Swagger em /api-docs
-  // NÃO parseia o YAML no servidor — serve o arquivo e a UI aponta para a URL
+  // Swagger UI com fallback
   const docsDir = path.resolve(__dirname, '../../docs');
   const openapiPath = path.join(docsDir, 'openapi.yaml');
 
   if (fs.existsSync(openapiPath)) {
-    // Servir o YAML diretamente
+    // Servir o YAML bruto
     app.get('/api-docs/openapi.yaml', (_req, res) => {
       res.sendFile(openapiPath);
     });
 
-    // Montar Swagger UI apontando para a URL do YAML
-    app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(null, {
-      swaggerOptions: { url: '/api-docs/openapi.yaml' }
-    }));
+    // Middleware para arquivos estáticos do Swagger UI
+    app.use('/api-docs', swaggerUi.serve);
+
+    // GET explícito sem redirecionamento (garante 200 em /api-docs)
+    app.get('/api-docs', (req, res, next) => {
+      // swaggerUi.setup retorna uma função middleware – chamamos diretamente
+      const handler = swaggerUi.setup(null, {
+        swaggerOptions: { url: '/api-docs/openapi.yaml' }
+      });
+      handler(req, res, next);
+    });
 
     logger.info('Swagger UI available at /api-docs');
   } else {
     logger.warn('OpenAPI documentation file not found', { path: openapiPath });
 
-    // Fallback informativo em /api-docs
+    // Fallback JSON
     app.get('/api-docs', (_req, res) => {
       res.status(200).json({
         status: 'unavailable',
@@ -86,7 +92,6 @@ function createApp(container) {
       });
     });
 
-    // Fallback para a URL do YAML (evita 404)
     app.get('/api-docs/openapi.yaml', (_req, res) => {
       res.status(200).json({
         status: 'unavailable',
