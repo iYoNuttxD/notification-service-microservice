@@ -1,15 +1,17 @@
 openapi: 3.0.3
+
 info:
   title: Notification Service API
   description: |
-    Microserviço de notificações para Click Delivery
-    
+    Microserviço de notificações para Click Delivery.
+
     Suporta notificações via:
-    - Push (Firebase Cloud Messaging)
-    - E-mail (SendGrid via SMTP)
-    - SMS (Twilio)
-    
-    Com políticas de fallback, preferências de usuário, retry/backoff e métricas Prometheus.
+      - Push (Firebase Cloud Messaging)
+      - E-mail (SendGrid via SMTP)
+      - SMS (Twilio)
+
+    Com políticas de fallback, preferências de usuário,
+    retry/backoff e métricas Prometheus.
   version: 1.0.0
   contact:
     name: Click Delivery Team
@@ -17,24 +19,23 @@ info:
 servers:
   - url: http://localhost:3003/api/v1
     description: Local development
-  - url: https://notifications.clickdelivery.com.br/api/v1
+  - url: https://clickdelivery-notification-service.azurewebsites.net/api/v1
     description: Production
 
 tags:
+  - name: System
+    description: Endpoints de sistema
   - name: Notifications
     description: Operações de notificações
   - name: Preferences
     description: Preferências de usuário
-  - name: System
-    description: Endpoints de sistema
 
 paths:
   /health:
     get:
-      tags:
-        - System
+      tags: [System]
       summary: Health check
-      description: Verifica o status do serviço
+      description: Verifica o status do serviço.
       responses:
         '200':
           description: Serviço saudável
@@ -54,10 +55,9 @@ paths:
 
   /metrics:
     get:
-      tags:
-        - System
+      tags: [System]
       summary: Prometheus metrics
-      description: Retorna métricas no formato Prometheus
+      description: Retorna métricas no formato Prometheus.
       responses:
         '200':
           description: Métricas
@@ -68,10 +68,9 @@ paths:
 
   /notifications:
     post:
-      tags:
-        - Notifications
+      tags: [Notifications]
       summary: Criar notificação
-      description: Cria uma nova notificação (admin/interno)
+      description: Cria uma nova notificação (admin/interno).
       security:
         - bearerAuth: []
       requestBody:
@@ -123,10 +122,9 @@ paths:
           description: Não autorizado
 
     get:
-      tags:
-        - Notifications
+      tags: [Notifications]
       summary: Listar notificações
-      description: Lista notificações com filtros (admin vê todas, usuário vê apenas as próprias)
+      description: Lista notificações com filtros.
       security:
         - bearerAuth: []
       parameters:
@@ -189,10 +187,9 @@ paths:
 
   /notifications/{id}:
     get:
-      tags:
-        - Notifications
+      tags: [Notifications]
       summary: Obter notificação por ID
-      description: Retorna detalhes de uma notificação
+      description: Retorna detalhes de uma notificação.
       security:
         - bearerAuth: []
       parameters:
@@ -213,13 +210,11 @@ paths:
 
   /notifications/user/{userId}:
     delete:
-      tags:
-        - Notifications
+      tags: [Notifications]
       summary: Deletar todos os dados do usuário (LGPD/GDPR)
       description: |
-        Remove todos os dados relacionados ao usuário do sistema para conformidade com LGPD/GDPR.
-        Inclui: notificações, tentativas, preferências.
-        **Apenas administradores podem executar esta operação.**
+        Remove todos os dados relacionados ao usuário
+        para conformidade com LGPD/GDPR.
       security:
         - bearerAuth: []
       parameters:
@@ -243,35 +238,18 @@ paths:
                   message:
                     type: string
                     example: User data deleted successfully
-                  deleted:
-                    type: object
-                    description: Summary of deleted records
-                    properties:
-                      notifications:
-                        type: integer
-                        description: Número de notificações deletadas
-                      attempts:
-                        type: integer
-                        description: Número de tentativas deletadas
-                      preferences:
-                        type: integer
-                        description: Número de registros de preferências deletados
-                      inbox:
-                        type: integer
-                        description: Número de registros de inbox deletados
         '400':
           description: userId é obrigatório
         '403':
-          description: Acesso negado - Apenas administradores
+          description: Apenas administradores
         '500':
           description: Erro interno do servidor
 
   /preferences/{userId}:
     get:
-      tags:
-        - Preferences
+      tags: [Preferences]
       summary: Obter preferências do usuário
-      description: Retorna as preferências de notificação do usuário
+      description: Retorna as preferências de notificação do usuário.
       security:
         - bearerAuth: []
       parameters:
@@ -289,10 +267,9 @@ paths:
                 $ref: '#/components/schemas/Preferences'
 
     put:
-      tags:
-        - Preferences
+      tags: [Preferences]
       summary: Atualizar preferências do usuário
-      description: Atualiza as preferências de notificação do usuário
+      description: Atualiza as preferências de notificação do usuário.
       security:
         - bearerAuth: []
       parameters:
@@ -377,57 +354,6 @@ components:
           type: string
           format: date-time
 
-    Attempt:
-      type: object
-      description: Representa uma tentativa de envio de notificação por um canal específico
-      properties:
-        id:
-          type: string
-          description: ID único da tentativa
-        notificationId:
-          type: string
-          description: ID da notificação relacionada
-        channel:
-          type: string
-          enum: [push, email, sms]
-          description: Canal utilizado nesta tentativa
-        provider:
-          type: string
-          enum: [fcm, sendgrid, twilio]
-          description: Provedor utilizado para envio
-        status:
-          type: string
-          enum: [PENDING, SUCCESS, FAILED]
-          description: Status da tentativa
-        providerMessageId:
-          type: string
-          nullable: true
-          description: ID da mensagem retornado pelo provedor (ex: FCM message ID, SendGrid message ID, Twilio SID)
-        error:
-          type: string
-          nullable: true
-          description: Mensagem de erro caso a tentativa tenha falhado
-        errorCode:
-          type: string
-          nullable: true
-          description: Código de erro específico do provedor ou categoria de erro
-        attemptNumber:
-          type: integer
-          description: Número sequencial da tentativa para este canal
-        startedAt:
-          type: string
-          format: date-time
-          description: Data/hora de início da tentativa
-        completedAt:
-          type: string
-          format: date-time
-          nullable: true
-          description: Data/hora de conclusão da tentativa
-        durationMs:
-          type: integer
-          nullable: true
-          description: Duração da tentativa em milissegundos
-
     Preferences:
       type: object
       properties:
@@ -436,12 +362,9 @@ components:
         channels:
           type: object
           properties:
-            email:
-              type: boolean
-            push:
-              type: boolean
-            sms:
-              type: boolean
+            email: { type: boolean }
+            push: { type: boolean }
+            sms: { type: boolean }
         events:
           type: object
           additionalProperties:
@@ -464,12 +387,9 @@ components:
         channels:
           type: object
           properties:
-            email:
-              type: boolean
-            push:
-              type: boolean
-            sms:
-              type: boolean
+            email: { type: boolean }
+            push: { type: boolean }
+            sms: { type: boolean }
         events:
           type: object
         quietHours:
