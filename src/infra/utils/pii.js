@@ -18,7 +18,14 @@ function maskPhone(phone) {
   return phone.substring(0, 3) + '***' + phone.substring(phone.length - 2);
 }
 
+function maskDeviceToken(token) {
+  if (!token) return '';
+  if (token.length < 10) return '***';
+  return token.substring(0, 8) + '***' + token.substring(token.length - 4);
+}
+
 module.exports = {
   maskEmail,
-  maskPhone
+  maskPhone,
+  maskDeviceToken
 };

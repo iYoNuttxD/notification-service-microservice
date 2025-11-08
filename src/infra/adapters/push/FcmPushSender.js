@@ -1,5 +1,6 @@
 const admin = require('firebase-admin');
 const handlebars = require('handlebars');
+const { maskDeviceToken } = require('../../utils/pii');
 
 class FcmPushSender {
   constructor(config, logger, metrics) {
@@ -74,6 +75,7 @@ class FcmPushSender {
 
       if (this.mockMode) {
         this.logger.info('MOCK: Push notification would be sent', {
+          deviceToken: maskDeviceToken(notification.recipient.deviceToken),
           title,
           body: body.substring(0, 50),
           correlationId: notification.correlationId
@@ -92,6 +94,7 @@ class FcmPushSender {
 
       this.logger.info('Push notification sent successfully', {
         notificationId: notification.id,
+        deviceToken: maskDeviceToken(notification.recipient.deviceToken),
         messageId,
         correlationId: notification.correlationId
       });

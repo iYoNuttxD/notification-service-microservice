@@ -40,6 +40,13 @@ class MongoInboxRepository {
       throw error;
     }
   }
+
+  async deleteByUserId(_userId) {
+    // Note: inbox doesn't store userId directly, so this is a no-op
+    // but provided for consistency with LGPD requirements
+    // In the future, if inbox tracks userId, implement deletion here
+    return 0;
+  }
 }
 
 module.exports = MongoInboxRepository;

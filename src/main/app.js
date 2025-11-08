@@ -2,13 +2,27 @@ const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
+const swaggerUi = require('swagger-ui-express');
+const YAML = require('yaml');
+const fs = require('fs');
+const path = require('path');
 
 function createApp(container) {
   const app = express();
   const logger = container.logger;
 
-  // Security middleware
-  app.use(helmet());
+  // Configure Helmet with relaxed CSP for Swagger UI
+  app.use((req, res, next) => {
+    if (req.path.startsWith('/api-docs')) {
+      // Disable CSP for Swagger UI
+      helmet({
+        contentSecurityPolicy: false
+      })(req, res, next);
+    } else {
+      // Strict CSP for other routes
+      helmet()(req, res, next);
+    }
+  });
   app.use(cors());
 
   // Body parsing
@@ -32,6 +46,21 @@ function createApp(container) {
     });
     next();
   });
+
+  // Swagger documentation at /api-docs using robust path resolver
+  try {
+    const openapiPath = path.resolve(__dirname, '../../docs/openapi.yaml');
+    if (fs.existsSync(openapiPath)) {
+      const openapiDoc = YAML.parse(fs.readFileSync(openapiPath, 'utf8'));
+      app.use('/api-docs', swaggerUi.serve);
+      app.get('/api-docs', swaggerUi.setup(openapiDoc));
+      logger.info('Swagger UI available at /api-docs');
+    } else {
+      logger.warn('OpenAPI documentation file not found', { path: openapiPath });
+    }
+  } catch (error) {
+    logger.warn('Failed to load OpenAPI documentation', { error: error.message });
+  }
 
   // Mount feature routes
   const systemRoutes = require('../features/system/http/routes');

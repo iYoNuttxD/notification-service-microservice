@@ -146,12 +146,13 @@ function createNotificationRoutes(container) {
       }
 
       // Delete from all repositories
-      const { notificationRepository, attemptRepository, preferencesRepository } = container;
+      const { notificationRepository, attemptRepository, preferencesRepository, inboxRepository } = container;
 
       const deletionResults = {
         notifications: 0,
         attempts: 0,
-        preferences: 0
+        preferences: 0,
+        inbox: 0
       };
 
       // First, get all notification IDs for this user (needed to delete attempts)
@@ -185,6 +186,13 @@ function createNotificationRoutes(container) {
         logger.warn('Failed to delete preferences', { error: error.message, userId });
       }
 
+      // Delete inbox entries (if any associated with userId)
+      try {
+        deletionResults.inbox = await inboxRepository.deleteByUserId(userId);
+      } catch (error) {
+        logger.warn('Failed to delete inbox', { error: error.message, userId });
+      }
+
       logger.info('User data deleted (LGPD/GDPR)', {
         userId,
         deletionResults
@@ -193,7 +201,7 @@ function createNotificationRoutes(container) {
       res.json({
         success: true,
         message: 'User data deleted successfully',
-        deletionResults
+        deleted: deletionResults
       });
     } catch (error) {
       logger.error('Failed to delete user data', { error: error.message });
