@@ -14,9 +14,16 @@ function createApp(container) {
   // Configure Helmet with relaxed CSP for Swagger UI
   app.use((req, res, next) => {
     if (req.path.startsWith('/api-docs')) {
-      // Disable CSP for Swagger UI
+      // Permissive CSP for Swagger UI (allows inline scripts and styles needed by Swagger)
       helmet({
-        contentSecurityPolicy: false
+        contentSecurityPolicy: {
+          directives: {
+            defaultSrc: ["'self'"],
+            scriptSrc: ["'self'", "'unsafe-inline'"],
+            styleSrc: ["'self'", "'unsafe-inline'"],
+            imgSrc: ["'self'", 'data:', 'https:']
+          }
+        }
       })(req, res, next);
     } else {
       // Strict CSP for other routes
