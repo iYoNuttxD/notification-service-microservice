@@ -52,9 +52,19 @@ function createApp(container) {
     next();
   });
 
-  // Redirect root → /api-docs (para evitar 404 no "/")
+  // Raiz responde JSON (sem 404)
   app.get('/', (_req, res) => {
-    res.redirect(302, '/api-docs');
+    res.status(200).json({
+      service: 'Notification Service',
+      version: '1.0.0',
+      endpoints: {
+        health: '/api/v1/health',
+        metrics: '/api/v1/metrics',
+        apiDocs: '/api-docs',
+        notifications: '/api/v1/notifications',
+        preferences: '/api/v1/preferences/:userId'
+      }
+    });
   });
 
   // Swagger UI + Fallback (SEM parse do YAML no servidor)
@@ -62,7 +72,7 @@ function createApp(container) {
   const openapiPath = path.join(docsDir, 'openapi.yaml');
 
   if (fs.existsSync(openapiPath)) {
-    // Servir o YAML
+    // Servir o YAML diretamente
     app.get('/api-docs/openapi.yaml', (_req, res) => {
       res.sendFile(openapiPath);
     });
