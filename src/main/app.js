@@ -10,31 +10,39 @@ function createApp(container) {
   const app = express();
   const logger = container.logger;
 
-  // Helmet (CSP relaxado só para /api-docs)
-  app.use((req, res, next) => {
-    if (req.path.startsWith('/api-docs')) {
-      helmet({
-        contentSecurityPolicy: {
-          directives: {
-            defaultSrc: ["'self'"],
-            scriptSrc: ["'self'", "'unsafe-inline'"],
-            styleSrc: ["'self'", "'unsafe-inline'"],
-            imgSrc: ["'self'", 'data:', 'https:']
-          }
-        }
-      })(req, res, next);
-    } else {
-      helmet()(req, res, next);
+  /**
+   * Security (Helmet)
+   * - CSP relaxado apenas para /api-docs (Swagger UI)
+   */
+  const helmetDefault = helmet();
+  const helmetDocs = helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", 'data:', 'https:']
+      }
     }
   });
 
-  app.use(cors());
+  app.use((req, res, next) => {
+    if (req.path.startsWith('/api-docs')) {
+      return helmetDocs(req, res, next);
+    }
+    return helmetDefault(req, res, next);
+  });
 
-  // Body parsing
+  /**
+   * CORS + Body parsing
+   */
+  app.use(cors());
   app.use(express.json({ limit: '1mb' }));
   app.use(express.urlencoded({ extended: true }));
 
-  // Rate limiting
+  /**
+   * Rate limiting em /api/*
+   */
   const limiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 100,
@@ -42,7 +50,9 @@ function createApp(container) {
   });
   app.use('/api/', limiter);
 
-  // Request logging
+  /**
+   * Request logging
+   */
   app.use((req, _res, next) => {
     logger.info('Incoming request', {
       method: req.method,
@@ -52,7 +62,9 @@ function createApp(container) {
     next();
   });
 
-  // Raiz responde JSON (sem 404)
+  /**
+   * Raiz responde JSON (status 200)
+   */
   app.get('/', (_req, res) => {
     res.status(200).json({
       service: 'Notification Service',
@@ -67,31 +79,40 @@ function createApp(container) {
     });
   });
 
-  // Swagger UI + Fallback (SEM parse do YAML no servidor)
+  /**
+   * Swagger UI / OpenAPI
+   * - /api-docs            -> HTML (200)
+   * - /api-docs/           -> HTML (200)
+   * - /api-docs/openapi.yaml -> YAML
+   * - assets em /api-docs/* servidos corretamente
+   */
   const docsDir = path.resolve(__dirname, '../../docs');
   const openapiPath = path.join(docsDir, 'openapi.yaml');
 
   if (fs.existsSync(openapiPath)) {
-    // YAML da spec
+    // Serve o YAML da especificação
     app.get('/api-docs/openapi.yaml', (_req, res) => {
       res.sendFile(openapiPath);
     });
 
-    // Swagger UI montado corretamente em /api-docs
-    app.use(
-      '/api-docs',
-      swaggerUi.serve,
-      swaggerUi.setup(null, {
-        swaggerOptions: {
-          url: '/api-docs/openapi.yaml'
-        }
-      })
-    );
+    // Middleware estático do Swagger UI em /api-docs
+    app.use('/api-docs', swaggerUi.serve);
+
+    // Handler HTML do Swagger UI (sem redirect 301)
+    const swaggerSetup = swaggerUi.setup(null, {
+      swaggerOptions: {
+        url: '/api-docs/openapi.yaml'
+      }
+    });
+
+    app.get('/api-docs', swaggerSetup);
+    app.get('/api-docs/', swaggerSetup);
 
     logger.info('Swagger UI available at /api-docs');
   } else {
     logger.warn('OpenAPI documentation file not found', { path: openapiPath });
 
+    // Fallback amigável (sem 404) para /api-docs
     const docsFallback = (_req, res) => {
       res.status(200).json({
         status: 'unavailable',
@@ -112,7 +133,9 @@ function createApp(container) {
     });
   }
 
-  // Mount feature routes
+  /**
+   * Feature routes
+   */
   const systemRoutes = require('../features/system/http/routes');
   const notificationRoutes = require('../features/notifications/http/routes');
   const preferencesRoutes = require('../features/preferences/http/routes');
@@ -121,7 +144,9 @@ function createApp(container) {
   app.use('/api/v1', notificationRoutes(container));
   app.use('/api/v1', preferencesRoutes(container));
 
-  // 404 handler
+  /**
+   * 404 handler
+   */
   app.use((req, res) => {
     res.status(404).json({
       error: 'Not found',
@@ -129,7 +154,9 @@ function createApp(container) {
     });
   });
 
-  // Error handler
+  /**
+   * Error handler
+   */
   app.use((err, req, res, _next) => {
     logger.error('Unhandled error', {
       error: err.message,
