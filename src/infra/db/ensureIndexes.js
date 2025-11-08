@@ -10,6 +10,14 @@ async function ensureIndexes(mongoClient, dbName, logger) {
 
   logger.info('Ensuring database indexes...', { retentionDays, dedupWindowSec });
 
+  const results = {
+    notifications: false,
+    attempts: false,
+    inbox: false,
+    templates: false,
+    preferences: false
+  };
+
   try {
     // Notifications collection
     const notifications = db.collection('notifications');
@@ -23,6 +31,7 @@ async function ensureIndexes(mongoClient, dbName, logger) {
       { createdAt: 1 },
       { expireAfterSeconds: retentionDays * 24 * 60 * 60 }
     );
+    results.notifications = true;
     logger.info('Notifications indexes created');
 
     // Attempts collection
@@ -33,6 +42,7 @@ async function ensureIndexes(mongoClient, dbName, logger) {
       { startedAt: 1 },
       { expireAfterSeconds: retentionDays * 24 * 60 * 60 }
     );
+    results.attempts = true;
     logger.info('Attempts indexes created');
 
     // Inbox collection
@@ -42,22 +52,32 @@ async function ensureIndexes(mongoClient, dbName, logger) {
       { processedAt: 1 },
       { expireAfterSeconds: dedupWindowSec }
     );
+    results.inbox = true;
     logger.info('Inbox indexes created');
 
     // Templates collection
     const templates = db.collection('templates');
     await templates.createIndex({ key: 1, channel: 1, locale: 1 }, { unique: true });
+    results.templates = true;
     logger.info('Templates indexes created');
 
     // Preferences collection
     const preferences = db.collection('preferences');
     await preferences.createIndex({ _id: 1 }); // userId is stored as _id
     await preferences.createIndex({ updatedAt: 1 });
+    results.preferences = true;
     logger.info('Preferences indexes created');
 
-    logger.info('All database indexes ensured successfully');
+    // Summary log for easier scanning
+    const successCount = Object.values(results).filter(Boolean).length;
+    const totalCount = Object.keys(results).length;
+    logger.info(`SUMMARY: Database indexes ensured (${successCount}/${totalCount} collections)`, results);
   } catch (error) {
     logger.error('Failed to ensure indexes', { error: error.message, stack: error.stack });
+    // Summary log even on partial failure
+    const successCount = Object.values(results).filter(Boolean).length;
+    const totalCount = Object.keys(results).length;
+    logger.warn(`SUMMARY: Database indexes partially ensured (${successCount}/${totalCount} collections)`, results);
     // Don't throw - indexes may already exist or be in progress
   }
 }

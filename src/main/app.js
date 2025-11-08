@@ -55,18 +55,34 @@ function createApp(container) {
   });
 
   // Swagger documentation at /api-docs using robust path resolver
+  const openapiPath = path.resolve(__dirname, '../../docs/openapi.yaml');
+  let openapiAvailable = false;
+
   try {
-    const openapiPath = path.resolve(__dirname, '../../docs/openapi.yaml');
     if (fs.existsSync(openapiPath)) {
       const openapiDoc = YAML.parse(fs.readFileSync(openapiPath, 'utf8'));
       app.use('/api-docs', swaggerUi.serve);
       app.get('/api-docs', swaggerUi.setup(openapiDoc));
+      openapiAvailable = true;
       logger.info('Swagger UI available at /api-docs');
     } else {
       logger.warn('OpenAPI documentation file not found', { path: openapiPath });
     }
   } catch (error) {
     logger.warn('Failed to load OpenAPI documentation', { error: error.message });
+  }
+
+  // Fallback endpoint when OpenAPI spec is not available
+  if (!openapiAvailable) {
+    app.get('/api-docs', (req, res) => {
+      res.status(200).json({
+        status: 'unavailable',
+        message: 'OpenAPI spec not found',
+        expectedPath: 'docs/openapi.yaml',
+        suggestion: 'Add the OpenAPI specification file at the expected path to enable Swagger UI documentation.'
+      });
+    });
+    logger.info('API docs fallback endpoint registered at /api-docs');
   }
 
   // Mount feature routes
