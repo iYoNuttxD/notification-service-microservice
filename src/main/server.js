@@ -9,10 +9,16 @@ async function main() {
   try {
     // Initialize container
     container = await createContainer();
-    const { logger } = container;
+    const { logger, retryScheduler } = container;
 
     // Setup NATS subscribers
     await setupSubscribers(container);
+
+    // Start retry scheduler if configured
+    if (retryScheduler) {
+      retryScheduler.start();
+      logger.info('RetryScheduler started');
+    }
 
     // Create Express app
     const app = createApp(container);

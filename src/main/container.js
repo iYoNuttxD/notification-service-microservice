@@ -20,8 +20,18 @@ const FcmPushSender = require('../infra/adapters/push/FcmPushSender');
 const OpaClient = require('../infra/adapters/opa/OpaClient');
 const JwtAuthVerifier = require('../infra/adapters/auth/JwtAuthVerifier');
 
-// Use cases
+// Use cases - Notifications
 const DispatchNotificationUseCase = require('../features/notifications/use-cases/DispatchNotificationUseCase');
+const RetryPendingUseCase = require('../features/notifications/use-cases/RetryPendingUseCase');
+const RenderTemplateUseCase = require('../features/notifications/use-cases/RenderTemplateUseCase');
+const PublishStatusUseCase = require('../features/notifications/use-cases/PublishStatusUseCase');
+
+// Use cases - Preferences
+const GetPreferencesUseCase = require('../features/preferences/use-cases/GetPreferencesUseCase');
+const UpdatePreferencesUseCase = require('../features/preferences/use-cases/UpdatePreferencesUseCase');
+
+// Scheduler
+const RetryScheduler = require('../infra/scheduler/RetryScheduler');
 
 async function createContainer() {
   const logger = createLogger();
@@ -110,7 +120,7 @@ async function createContainer() {
   // Parse backoff sequence
   const backoffSequence = parseBackoffSequence(process.env.NOTIF_BACKOFF_SEQUENCE);
 
-  // Initialize use cases
+  // Initialize use cases - Notifications
   const dispatchNotificationUseCase = new DispatchNotificationUseCase({
     notificationRepository,
     attemptRepository,
@@ -123,6 +133,52 @@ async function createContainer() {
     metrics,
     backoffSequence
   });
+
+  const retryPendingUseCase = new RetryPendingUseCase({
+    notificationRepository,
+    attemptRepository,
+    templateRepository,
+    channelSenders,
+    eventPublisher: natsEventBus,
+    logger,
+    metrics,
+    backoffSequence
+  });
+
+  const renderTemplateUseCase = new RenderTemplateUseCase({
+    templateRepository,
+    logger
+  });
+
+  const publishStatusUseCase = new PublishStatusUseCase({
+    eventPublisher: natsEventBus,
+    logger
+  });
+
+  // Initialize use cases - Preferences
+  const getPreferencesUseCase = new GetPreferencesUseCase({
+    preferencesRepository,
+    logger
+  });
+
+  const updatePreferencesUseCase = new UpdatePreferencesUseCase({
+    preferencesRepository,
+    logger
+  });
+
+  // Initialize retry scheduler if JetStream is disabled
+  let retryScheduler = null;
+  const jetstreamEnabled = process.env.NATS_JETSTREAM_ENABLED === 'true';
+  if (!jetstreamEnabled) {
+    const schedulerIntervalMs = parseInt(process.env.RETRY_SCHEDULER_INTERVAL_MS || '30000', 10);
+    retryScheduler = new RetryScheduler({
+      notificationRepository,
+      retryPendingUseCase,
+      logger,
+      intervalMs: schedulerIntervalMs
+    });
+    logger.info('RetryScheduler initialized (JetStream disabled)', { intervalMs: schedulerIntervalMs });
+  }
 
   logger.info('Application container initialized successfully');
 
@@ -140,14 +196,24 @@ async function createContainer() {
     opaClient,
     authVerifier,
     dispatchNotificationUseCase,
+    retryPendingUseCase,
+    renderTemplateUseCase,
+    publishStatusUseCase,
+    getPreferencesUseCase,
+    updatePreferencesUseCase,
+    retryScheduler,
     backoffSequence
   };
 }
 
 async function closeContainer(container) {
-  const { logger, mongoClient, natsEventBus } = container;
+  const { logger, mongoClient, natsEventBus, retryScheduler } = container;
 
   logger.info('Closing application container...');
+
+  if (retryScheduler) {
+    retryScheduler.stop();
+  }
 
   if (natsEventBus) {
     await natsEventBus.close();

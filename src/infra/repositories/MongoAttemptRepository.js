@@ -39,6 +39,16 @@ class MongoAttemptRepository {
     const Attempt = require('../../domain/entities/Attempt');
     return docs.map(doc => Attempt.fromDocument(doc));
   }
+
+  async deleteByNotificationIds(notificationIds) {
+    if (!notificationIds || notificationIds.length === 0) {
+      return 0;
+    }
+    const result = await this.collection.deleteMany({
+      notificationId: { $in: notificationIds }
+    });
+    return result.deletedCount;
+  }
 }
 
 module.exports = MongoAttemptRepository;

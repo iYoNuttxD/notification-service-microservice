@@ -33,49 +33,14 @@ function createApp(container) {
     next();
   });
 
-  // Health check (no auth required)
-  app.get('/api/v1/health', (req, res) => {
-    res.json({
-      status: 'healthy',
-      timestamp: new Date().toISOString(),
-      uptime: process.uptime()
-    });
-  });
-
-  // Metrics endpoint (internal only)
-  app.get('/api/v1/metrics', async (req, res) => {
-    try {
-      const metrics = await container.metrics.getMetrics();
-      res.set('Content-Type', 'text/plain');
-      res.send(metrics);
-    } catch (error) {
-      logger.error('Failed to get metrics', { error: error.message });
-      res.status(500).json({ error: 'Failed to get metrics' });
-    }
-  });
-
   // Mount feature routes
+  const systemRoutes = require('../features/system/http/routes');
   const notificationRoutes = require('../features/notifications/http/routes');
   const preferencesRoutes = require('../features/preferences/http/routes');
 
+  app.use('/api/v1', systemRoutes(container));
   app.use('/api/v1', notificationRoutes(container));
   app.use('/api/v1', preferencesRoutes(container));
-
-  // Swagger documentation
-  const swaggerUi = require('swagger-ui-express');
-  const YAML = require('yaml');
-  const fs = require('fs');
-  const path = require('path');
-
-  try {
-    const openapiPath = path.join(__dirname, '../../docs/openapi.yaml');
-    if (fs.existsSync(openapiPath)) {
-      const openapiDoc = YAML.parse(fs.readFileSync(openapiPath, 'utf8'));
-      app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(openapiDoc));
-    }
-  } catch (error) {
-    logger.warn('Failed to load OpenAPI documentation', { error: error.message });
-  }
 
   // 404 handler
   app.use((req, res) => {

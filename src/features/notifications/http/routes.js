@@ -131,6 +131,76 @@ function createNotificationRoutes(container) {
     }
   });
 
+  // DELETE /api/v1/notifications/user/:userId - Delete all user data (LGPD/GDPR)
+  router.delete('/notifications/user/:userId', authenticate, authorize('delete_user_data'), async (req, res) => {
+    try {
+      const { userId } = req.params;
+
+      // Only admin can delete user data
+      if (req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Forbidden - Admin access required' });
+      }
+
+      if (!userId) {
+        return res.status(400).json({ error: 'userId is required' });
+      }
+
+      // Delete from all repositories
+      const { notificationRepository, attemptRepository, preferencesRepository } = container;
+
+      const deletionResults = {
+        notifications: 0,
+        attempts: 0,
+        preferences: 0
+      };
+
+      // First, get all notification IDs for this user (needed to delete attempts)
+      const userNotifications = await notificationRepository.findByFilters({
+        'recipient.userId': userId,
+        limit: 10000
+      });
+
+      const notificationIds = userNotifications.data.map(n => n.id);
+
+      // Delete attempts for these notifications
+      if (notificationIds.length > 0) {
+        try {
+          deletionResults.attempts = await attemptRepository.deleteByNotificationIds(notificationIds);
+        } catch (error) {
+          logger.warn('Failed to delete attempts', { error: error.message, userId });
+        }
+      }
+
+      // Delete notifications
+      try {
+        deletionResults.notifications = await notificationRepository.deleteByUserId(userId);
+      } catch (error) {
+        logger.warn('Failed to delete notifications', { error: error.message, userId });
+      }
+
+      // Delete preferences
+      try {
+        deletionResults.preferences = await preferencesRepository.deleteByUserId(userId);
+      } catch (error) {
+        logger.warn('Failed to delete preferences', { error: error.message, userId });
+      }
+
+      logger.info('User data deleted (LGPD/GDPR)', {
+        userId,
+        deletionResults
+      });
+
+      res.json({
+        success: true,
+        message: 'User data deleted successfully',
+        deletionResults
+      });
+    } catch (error) {
+      logger.error('Failed to delete user data', { error: error.message });
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
   return router;
 }
 

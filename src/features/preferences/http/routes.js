@@ -1,9 +1,8 @@
 const express = require('express');
-const Preferences = require('../../../domain/entities/Preferences');
 
 function createPreferencesRoutes(container) {
   const router = express.Router();
-  const { preferencesRepository, authVerifier, opaClient, logger } = container;
+  const { getPreferencesUseCase, updatePreferencesUseCase, authVerifier, logger } = container;
 
   // Auth middleware
   const authenticate = async (req, res, next) => {
@@ -42,16 +41,7 @@ function createPreferencesRoutes(container) {
         return res.status(501).json({ error: 'Preferences feature not enabled' });
       }
 
-      const preferences = new Preferences({
-        userId,
-        channels: req.body.channels,
-        events: req.body.events,
-        quietHours: req.body.quietHours,
-        locale: req.body.locale || 'pt-BR',
-        updatedAt: new Date()
-      });
-
-      await preferencesRepository.save(preferences);
+      const preferences = await updatePreferencesUseCase.execute(userId, req.body);
 
       res.json({
         success: true,
@@ -78,7 +68,7 @@ function createPreferencesRoutes(container) {
         return res.status(501).json({ error: 'Preferences feature not enabled' });
       }
 
-      const preferences = await preferencesRepository.findByUserId(userId);
+      const preferences = await getPreferencesUseCase.execute(userId);
 
       res.json(preferences);
     } catch (error) {
