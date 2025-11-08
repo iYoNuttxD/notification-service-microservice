@@ -72,29 +72,26 @@ function createApp(container) {
   const openapiPath = path.join(docsDir, 'openapi.yaml');
 
   if (fs.existsSync(openapiPath)) {
-    // Servir o YAML diretamente
+    // YAML da spec
     app.get('/api-docs/openapi.yaml', (_req, res) => {
       res.sendFile(openapiPath);
     });
 
-    // Handler explícito primeiro (garante 200 em /api-docs e /api-docs/)
-    const swaggerHandler = (req, res, next) => {
-      const handler = swaggerUi.setup(null, {
-        swaggerOptions: { url: '/api-docs/openapi.yaml' }
-      });
-      handler(req, res, next);
-    };
-    app.get('/api-docs', swaggerHandler);
-    app.get('/api-docs/', swaggerHandler);
-
-    // Static assets do Swagger UI (DEPOIS dos GETs para evitar 301)
-    app.use('/api-docs', swaggerUi.serve);
+    // Swagger UI montado corretamente em /api-docs
+    app.use(
+      '/api-docs',
+      swaggerUi.serve,
+      swaggerUi.setup(null, {
+        swaggerOptions: {
+          url: '/api-docs/openapi.yaml'
+        }
+      })
+    );
 
     logger.info('Swagger UI available at /api-docs');
   } else {
     logger.warn('OpenAPI documentation file not found', { path: openapiPath });
 
-    // Fallback informativo (sem 404) em /api-docs e /api-docs/
     const docsFallback = (_req, res) => {
       res.status(200).json({
         status: 'unavailable',
@@ -102,10 +99,10 @@ function createApp(container) {
         expectedPath: openapiPath
       });
     };
+
     app.get('/api-docs', docsFallback);
     app.get('/api-docs/', docsFallback);
 
-    // Fallback para a URL do YAML
     app.get('/api-docs/openapi.yaml', (_req, res) => {
       res.status(200).json({
         status: 'unavailable',
