@@ -54,7 +54,7 @@ function createApp(container) {
     next();
   });
 
-  // Raiz informativa (sem 404)
+  // Raiz informativa
   app.get('/', (_req, res) => {
     res.status(200).json({
       service: 'Notification Service',
@@ -69,23 +69,26 @@ function createApp(container) {
     });
   });
 
-  // Swagger UI
+  // Swagger UI / Fallback JSON
   const openapiPath = path.resolve(__dirname, '../../docs/openapi.yaml');
   let spec = null;
+  let specError = null;
 
   if (fs.existsSync(openapiPath)) {
     try {
-      spec = YAML.parse(fs.readFileSync(openapiPath, 'utf8'));
+      const raw = fs.readFileSync(openapiPath, 'utf8');
+      spec = YAML.parse(raw);
       logger.info('OpenAPI spec loaded', { path: openapiPath });
     } catch (err) {
-      logger.warn('Failed to parse OpenAPI spec, using fallback UI', { error: err.message });
+      specError = err;
+      logger.warn('Failed to parse OpenAPI spec', { error: err.message, path: openapiPath });
     }
   } else {
-    logger.warn('OpenAPI spec not found, using fallback UI', { path: openapiPath });
+    logger.warn('OpenAPI spec not found', { path: openapiPath });
   }
 
-  if (spec) {
-    // Handler explícito para devolver 200 em /api-docs e /api-docs/ sem 301
+  if (spec && !specError) {
+    // Monta UI sem redirect 301
     const uiHandler = (req, res, next) => {
       const handler = swaggerUi.setup(spec, {
         customSiteTitle: 'Notification Service API Docs',
@@ -95,45 +98,25 @@ function createApp(container) {
     };
     app.get('/api-docs', uiHandler);
     app.get('/api-docs/', uiHandler);
-
-    // Assets do Swagger servidos em /api-docs/... (note a barra final no mount)
     app.use('/api-docs/', swaggerUi.serve);
   } else {
-    // Fallback HTML simples (não referencia assets do Swagger)
-    const fallbackHtml = `<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-<meta charset="UTF-8"/>
-<title>Notification Service API Docs (Fallback)</title>
-<style>
-  body { font-family: Arial, sans-serif; margin: 40px; }
-  code { background: #f2f2f2; padding: 2px 4px; }
-  .hint { margin-top: 20px; padding: 12px; background:#fff3cd; border:1px solid #ffeeba; }
-</style>
-</head>
-<body>
-  <h1>API Docs Indisponível</h1>
-  <p>O arquivo <code>docs/openapi.yaml</code> não foi encontrado ou está inválido.</p>
-  <div class="hint">
-    <strong>Como habilitar:</strong>
-    <ol>
-      <li>Adicionar <code>docs/openapi.yaml</code> válido ao repositório.</li>
-      <li>Garantir que o arquivo seja incluído no pacote de deploy.</li>
-      <li>Reimplantar o serviço.</li>
-    </ol>
-  </div>
-  <p>Esperado em: <code>${openapiPath}</code></p>
-</body>
-</html>`;
-    const fallbackHandler = (_req, res) => res.status(200).send(fallbackHtml);
-    app.get('/api-docs', fallbackHandler);
-    app.get('/api-docs/', fallbackHandler);
-
-    // Opcional: servir static para evitar 404 de assets caso alguém force o HTML antigo
-    app.use('/api-docs/', swaggerUi.serve);
+    // JSON fallback (o teste espera application/json)
+    const jsonFallback = (_req, res) => {
+      res.status(200).json({
+        status: 'unavailable',
+        message: specError
+          ? `OpenAPI spec parse failed: ${specError.message}`
+          : 'OpenAPI spec not found. Add docs/openapi.yaml to enable Swagger UI.',
+        expectedPath: openapiPath
+      });
+    };
+    app.get('/api-docs', jsonFallback);
+    app.get('/api-docs/', jsonFallback);
+    app.get('/api-docs/openapi.yaml', jsonFallback);
+    // Não monta swaggerUi.serve para evitar assets quebrados em fallback
   }
 
-  // Rotas de features
+  // Feature routes
   const systemRoutes = require('../features/system/http/routes');
   const notificationRoutes = require('../features/notifications/http/routes');
   const preferencesRoutes = require('../features/preferences/http/routes');
