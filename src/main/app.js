@@ -11,7 +11,7 @@ function createApp(container) {
   const app = express();
   const logger = container.logger;
 
-  // Helmet with relaxed CSP only for /api-docs; strict elsewhere
+  // Configure Helmet with relaxed CSP for Swagger UI
   app.use((req, res, next) => {
     if (req.path.startsWith('/api-docs')) {
       helmet({
@@ -28,14 +28,13 @@ function createApp(container) {
       helmet()(req, res, next);
     }
   });
-
   app.use(cors());
 
   // Body parsing
   app.use(express.json({ limit: '1mb' }));
   app.use(express.urlencoded({ extended: true }));
 
-  // Rate limiting for /api/*
+  // Rate limiting
   const limiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 100,
@@ -44,7 +43,7 @@ function createApp(container) {
   app.use('/api/', limiter);
 
   // Request logging
-  app.use((req, _res, next) => {
+  app.use((req, res, next) => {
     logger.info('Incoming request', {
       method: req.method,
       path: req.path,
@@ -52,7 +51,8 @@ function createApp(container) {
     });
     next();
   });
-  // Swagger documentation at /api-docs with fallback if spec missing
+
+  // Swagger documentation at /api-docs with fallback
   try {
     const openapiPath = path.resolve(__dirname, '../../docs/openapi.yaml');
     if (fs.existsSync(openapiPath)) {
@@ -66,7 +66,7 @@ function createApp(container) {
         res.status(200).json({
           status: 'unavailable',
           message: 'OpenAPI spec not found. Add docs/openapi.yaml to enable Swagger UI.',
-          expectedPath: openapiPath
+          expectedPath: path.resolve(__dirname, '../../docs/openapi.yaml')
         });
       });
     }
@@ -80,6 +80,11 @@ function createApp(container) {
       });
     });
   }
+
+  // Redirect root to /api-docs to avoid 404 confusion
+  app.get('/', (_req, res) => {
+    res.redirect(302, '/api-docs');
+  });
 
   // Mount feature routes
   const systemRoutes = require('../features/system/http/routes');
