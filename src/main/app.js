@@ -48,11 +48,36 @@ function createApp(container) {
   /**
    * Rate limiting em /api/*
    */
+  // Rate limiting em /api/*
   const limiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 100,
-    message: 'Too many requests from this IP'
+    message: 'Too many requests from this IP',
+
+    // 🔑 Corrige o problema de IP inválido (IP:PORT)
+    keyGenerator: (req) => {
+      // 1. Se tiver X-Forwarded-For (Azure/proxy), usa o primeiro IP válido
+      const xff = req.headers['x-forwarded-for'];
+      if (typeof xff === 'string' && xff.length > 0) {
+        return xff.split(',')[0].trim();
+      }
+
+      // 2. Senão, usa req.ip/remoteAddress e remove porta se tiver
+      const raw =
+        req.ip ||
+        req.connection?.remoteAddress ||
+        req.socket?.remoteAddress ||
+        '';
+
+      // se vier no formato "IP:PORT", pega só o IP
+      const cleaned = raw.includes(':') && raw.includes('.')
+        ? raw.split(':')[0] // IPv4:port
+        : raw;
+
+      return cleaned;
+    },
   });
+
   app.use('/api/', limiter);
 
   /**
