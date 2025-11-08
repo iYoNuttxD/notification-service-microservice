@@ -1,7 +1,9 @@
+// src/main/app.js
 const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
+const swaggerUi = require('swagger-ui-express');
 const fs = require('fs');
 const path = require('path');
 
@@ -11,10 +13,11 @@ function createApp(container) {
 
   /**
    * Helmet
-   * - CSP padrão
-   * - CSP relaxado apenas para /api-docs (Swagger UI via CDN)
+   * - Padrão para tudo
+   * - CSP relaxado só para /api-docs (Swagger UI)
    */
   const helmetDefault = helmet();
+
   const helmetDocs = helmet({
     contentSecurityPolicy: {
       directives: {
@@ -82,71 +85,71 @@ function createApp(container) {
   /**
    * Swagger UI / OpenAPI
    * - openapi.yaml em /docs/openapi.yaml
-   * - /api-docs e /api-docs/ -> 200 (HTML com Swagger UI via CDN)
-   * - /api-docs/openapi.yaml -> YAML
+   * - /api-docs e /api-docs/ SEM redirecionar 301
+   * - HTML usa CDN do swagger-ui-dist (sem depender de /swagger-ui-bundle.js local)
    */
   const docsDir = path.resolve(__dirname, '../../docs');
   const openapiPath = path.join(docsDir, 'openapi.yaml');
 
   if (fs.existsSync(openapiPath)) {
-    // Serve a spec YAML
+    // Serve o YAML diretamente
     app.get('/api-docs/openapi.yaml', (_req, res) => {
       res.sendFile(openapiPath);
     });
 
-    // HTML do Swagger UI usando CDN (sem depender de arquivos locais)
+    // HTML do Swagger UI (mesmo conteúdo para /api-docs e /api-docs/)
     const swaggerHtml = `
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Notification Service API Docs</title>
-  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist/swagger-ui.css" />
-  <style>
-    body { margin: 0; padding: 0; }
-    #swagger-ui { margin: 0; }
-  </style>
+  <title>Notification Service - API Docs</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
 </head>
 <body>
   <div id="swagger-ui"></div>
-  <script src="https://unpkg.com/swagger-ui-dist/swagger-ui-bundle.js"></script>
-  <script src="https://unpkg.com/swagger-ui-dist/swagger-ui-standalone-preset.js"></script>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
   <script>
-    window.onload = () => {
+    window.onload = function () {
       window.ui = SwaggerUIBundle({
         url: '/api-docs/openapi.yaml',
         dom_id: '#swagger-ui',
-        presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
+        presets: [SwaggerUIBundle.presets.apis],
         layout: "BaseLayout"
       });
     };
   </script>
 </body>
-</html>
-    `.trim();
+</html>`.trim();
 
-    const swaggerHandler = (_req, res) => {
-      res.status(200).type('html').send(swaggerHtml);
-    };
+    // /api-docs (sem slash) -> 200 com HTML (sem 301)
+    app.get('/api-docs', (_req, res) => {
+      res.status(200).send(swaggerHtml);
+    });
 
-    app.get('/api-docs', swaggerHandler);
-    app.get('/api-docs/', swaggerHandler);
+    // /api-docs/ (com slash) -> 200 com o mesmo HTML
+    app.get('/api-docs/', (_req, res) => {
+      res.status(200).send(swaggerHtml);
+    });
 
-    logger.info('Swagger UI (CDN) available at /api-docs');
+    logger.info('Swagger UI available at /api-docs');
   } else {
     logger.warn('OpenAPI documentation file not found', { path: openapiPath });
 
-    const docsFallback = (_req, res) => {
-      res.status(200).json({
-        status: 'unavailable',
-        message:
-          'OpenAPI spec not found. Add docs/openapi.yaml to enable Swagger UI.',
-        expectedPath: openapiPath
-      });
+    const docsUnavailablePayload = {
+      status: 'unavailable',
+      message: 'OpenAPI spec not found. Add docs/openapi.yaml to enable Swagger UI.',
+      expectedPath: openapiPath
     };
 
-    app.get('/api-docs', docsFallback);
-    app.get('/api-docs/', docsFallback);
+    app.get('/api-docs', (_req, res) => {
+      res.status(200).json(docsUnavailablePayload);
+    });
+
+    app.get('/api-docs/', (_req, res) => {
+      res.status(200).json(docsUnavailablePayload);
+    });
+
     app.get('/api-docs/openapi.yaml', (_req, res) => {
       res.status(200).json({
         status: 'unavailable',
