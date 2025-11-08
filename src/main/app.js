@@ -13,7 +13,7 @@ function createApp(container) {
   /**
    * Helmet
    * - CSP padrão
-   * - CSP relaxado só para /api-docs (Swagger UI)
+   * - CSP relaxado apenas para /api-docs (Swagger UI)
    */
   const helmetDefault = helmet();
   const helmetDocs = helmet({
@@ -82,26 +82,21 @@ function createApp(container) {
 
   /**
    * Swagger UI / OpenAPI
-   * - openapi.yaml em /docs/openapi.yaml
-   * - /api-docs -> 200 (HTML Swagger UI)
-   * - assets servidos em /api-docs/*
+   * - openapi.yaml em /docs/openapi.yaml (raiz do projeto)
+   * - /api-docs e /api-docs/ -> 200 (HTML Swagger UI)
+   * - /api-docs/openapi.yaml -> YAML
+   * - /api-docs/* -> assets do Swagger UI (CSS/JS) com MIME correto
    */
   const docsDir = path.resolve(__dirname, '../../docs');
   const openapiPath = path.join(docsDir, 'openapi.yaml');
 
   if (fs.existsSync(openapiPath)) {
-    // Serve o YAML da especificação
+    // Serve a spec YAML
     app.get('/api-docs/openapi.yaml', (_req, res) => {
       res.sendFile(openapiPath);
     });
 
-    // Serve assets do Swagger UI em /api-docs/* sem redirect 301
-    app.use(
-      '/api-docs',
-      swaggerUi.serveWithOptions({ redirect: false })
-    );
-
-    // Handler HTML do Swagger UI em /api-docs e /api-docs/
+    // Handler HTML do Swagger UI (precisa vir ANTES do static pra evitar 301)
     const swaggerHandler = swaggerUi.setup(null, {
       swaggerOptions: {
         url: '/api-docs/openapi.yaml'
@@ -110,6 +105,10 @@ function createApp(container) {
 
     app.get('/api-docs', swaggerHandler);
     app.get('/api-docs/', swaggerHandler);
+
+    // Assets estáticos do Swagger UI em /api-docs/*
+    // (vem DEPOIS dos GETs, assim /api-docs não sofre redirect)
+    app.use('/api-docs', swaggerUi.serve);
 
     logger.info('Swagger UI available at /api-docs');
   } else {
