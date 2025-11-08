@@ -52,7 +52,6 @@ function createApp(container) {
     });
     next();
   });
-
   // Swagger documentation at /api-docs with fallback if spec missing
   try {
     const openapiPath = path.resolve(__dirname, '../../docs/openapi.yaml');

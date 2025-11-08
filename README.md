@@ -383,6 +383,8 @@ Serviços disponíveis:
 
 **Nota sobre Swagger UI**: O Swagger UI está configurado com CSP relaxado apenas para a rota `/api-docs`. Todas as outras rotas mantêm configurações de segurança estritas do Helmet.
 
+**Nota sobre `/api-docs` fallback**: Se o arquivo `docs/openapi.yaml` não estiver presente no artefato deployado, o endpoint `/api-docs` retornará uma resposta JSON informativa (HTTP 200) explicando que a especificação OpenAPI está ausente, em vez de retornar 404. Quando o arquivo está presente, o Swagger UI é exibido normalmente.
+
 5. **Teste a API**
 
 ```bash
