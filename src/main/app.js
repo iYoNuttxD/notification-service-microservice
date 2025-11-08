@@ -11,10 +11,9 @@ function createApp(container) {
   const app = express();
   const logger = container.logger;
 
-  // Configure Helmet with relaxed CSP for Swagger UI
+  // Helmet with relaxed CSP only for /api-docs; strict elsewhere
   app.use((req, res, next) => {
     if (req.path.startsWith('/api-docs')) {
-      // Permissive CSP for Swagger UI (allows inline scripts and styles needed by Swagger)
       helmet({
         contentSecurityPolicy: {
           directives: {
@@ -26,26 +25,26 @@ function createApp(container) {
         }
       })(req, res, next);
     } else {
-      // Strict CSP for other routes
       helmet()(req, res, next);
     }
   });
+
   app.use(cors());
 
   // Body parsing
   app.use(express.json({ limit: '1mb' }));
   app.use(express.urlencoded({ extended: true }));
 
-  // Rate limiting
+  // Rate limiting for /api/*
   const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100, // limit each IP to 100 requests per windowMs
+    windowMs: 15 * 60 * 1000,
+    max: 100,
     message: 'Too many requests from this IP'
   });
   app.use('/api/', limiter);
 
   // Request logging
-  app.use((req, res, next) => {
+  app.use((req, _res, next) => {
     logger.info('Incoming request', {
       method: req.method,
       path: req.path,
@@ -54,7 +53,7 @@ function createApp(container) {
     next();
   });
 
-  // Swagger documentation at /api-docs using robust path resolver
+  // Swagger documentation at /api-docs with fallback if spec missing
   try {
     const openapiPath = path.resolve(__dirname, '../../docs/openapi.yaml');
     if (fs.existsSync(openapiPath)) {
@@ -64,9 +63,23 @@ function createApp(container) {
       logger.info('Swagger UI available at /api-docs');
     } else {
       logger.warn('OpenAPI documentation file not found', { path: openapiPath });
+      app.get('/api-docs', (_req, res) => {
+        res.status(200).json({
+          status: 'unavailable',
+          message: 'OpenAPI spec not found. Add docs/openapi.yaml to enable Swagger UI.',
+          expectedPath: openapiPath
+        });
+      });
     }
   } catch (error) {
     logger.warn('Failed to load OpenAPI documentation', { error: error.message });
+    app.get('/api-docs', (_req, res) => {
+      res.status(200).json({
+        status: 'unavailable',
+        message: 'Failed to load OpenAPI spec due to an error.',
+        error: error.message
+      });
+    });
   }
 
   // Mount feature routes
