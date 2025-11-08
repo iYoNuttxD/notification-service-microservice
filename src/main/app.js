@@ -10,6 +10,7 @@ const path = require('path');
 function createApp(container) {
   const app = express();
   const logger = container.logger;
+  app.set('trust proxy', 1); 
 
   /**
    * Helmet
