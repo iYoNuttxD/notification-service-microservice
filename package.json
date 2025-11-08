@@ -7,6 +7,8 @@
     "start": "node src/main/server.js",
     "dev": "nodemon src/main/server.js",
     "test": "jest",
+    "test:unit": "jest --testPathIgnorePatterns=/tests/integration/",
+    "test:integration": "jest tests/integration --runInBand",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "lint": "eslint src tests",

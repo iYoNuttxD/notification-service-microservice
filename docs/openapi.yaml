@@ -243,8 +243,9 @@ paths:
                   message:
                     type: string
                     example: User data deleted successfully
-                  deletionResults:
+                  deleted:
                     type: object
+                    description: Summary of deleted records
                     properties:
                       notifications:
                         type: integer
@@ -255,6 +256,9 @@ paths:
                       preferences:
                         type: integer
                         description: Número de registros de preferências deletados
+                      inbox:
+                        type: integer
+                        description: Número de registros de inbox deletados
         '400':
           description: userId é obrigatório
         '403':

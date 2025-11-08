@@ -1,8 +1,4 @@
 const express = require('express');
-const swaggerUi = require('swagger-ui-express');
-const YAML = require('yaml');
-const fs = require('fs');
-const path = require('path');
 
 function createSystemRoutes(container) {
   const router = express.Router();
@@ -28,20 +24,6 @@ function createSystemRoutes(container) {
       res.status(500).json({ error: 'Failed to get metrics' });
     }
   });
-
-  // Swagger documentation
-  try {
-    const openapiPath = path.join(__dirname, '../../../docs/openapi.yaml');
-    if (fs.existsSync(openapiPath)) {
-      const openapiDoc = YAML.parse(fs.readFileSync(openapiPath, 'utf8'));
-      router.use('/api-docs', swaggerUi.serve);
-      router.get('/api-docs', swaggerUi.setup(openapiDoc));
-    } else {
-      logger.warn('OpenAPI documentation file not found');
-    }
-  } catch (error) {
-    logger.warn('Failed to load OpenAPI documentation', { error: error.message });
-  }
 
   return router;
 }

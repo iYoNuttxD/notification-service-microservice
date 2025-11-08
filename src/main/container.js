@@ -2,6 +2,7 @@ const { MongoClient } = require('mongodb');
 const { createLogger } = require('../infra/utils/logger');
 const MetricsCollector = require('../infra/utils/metrics');
 const { parseBackoffSequence } = require('../infra/utils/backoff');
+const { ensureIndexes } = require('../infra/db/ensureIndexes');
 
 // Repositories
 const {
@@ -45,6 +46,9 @@ async function createContainer() {
   logger.info('Connected to MongoDB');
 
   const dbName = process.env.MONGODB_DB_NAME || 'notifications_db';
+
+  // Ensure all indexes are created
+  await ensureIndexes(mongoClient, dbName, logger);
 
   // Initialize repositories
   const notificationRepository = new MongoNotificationRepository(mongoClient, dbName);

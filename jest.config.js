@@ -10,6 +10,10 @@ module.exports = {
     '**/tests/**/*.test.js',
     '**/tests/**/*.spec.js'
   ],
+  testPathIgnorePatterns: [
+    '/node_modules/',
+    '/tests/integration/' // Skip integration tests by default (require MongoDB and NATS)
+  ],
   coverageThreshold: {
     global: {
       branches: 70,

@@ -85,6 +85,7 @@ class RetryPendingUseCase {
         notification.setError('Max retry attempts reached');
         await this.notificationRepository.update(notification);
         await this.publishStatusUpdate(notification);
+        await this.publishToDLQ(notification, 'Max retry attempts reached');
         this.logger.warn('Notification retry exhausted', {
           notificationId,
           totalAttempts,
@@ -111,6 +112,7 @@ class RetryPendingUseCase {
       notification.updateStatus('FAILED');
       await this.notificationRepository.update(notification);
       await this.publishStatusUpdate(notification);
+      await this.publishToDLQ(notification, 'Retry limit reached');
       return { success: false, reason: 'retry_limit_reached' };
     } catch (error) {
       this.logger.error('Failed to retry notification', {
@@ -226,6 +228,36 @@ class RetryPendingUseCase {
       await this.eventPublisher.publish('notifications.status.updated', statusData);
     } catch (error) {
       this.logger.error('Failed to publish status update', {
+        error: error.message,
+        notificationId: notification.id
+      });
+    }
+  }
+
+  async publishToDLQ(notification, reason) {
+    try {
+      const dlqData = {
+        eventId: notification.eventId,
+        notificationId: notification.id,
+        eventType: notification.eventType,
+        recipient: notification.recipient,
+        templateKey: notification.templateKey,
+        metadata: notification.metadata,
+        error: notification.lastError || reason,
+        reason,
+        channelsTried: notification.channelsTried,
+        timestamp: new Date().toISOString(),
+        correlationId: notification.correlationId,
+        traceId: notification.traceId
+      };
+
+      await this.eventPublisher.publish('notifications.dlq', dlqData);
+      this.logger.info('Notification sent to DLQ', {
+        notificationId: notification.id,
+        reason
+      });
+    } catch (error) {
+      this.logger.error('Failed to publish to DLQ', {
         error: error.message,
         notificationId: notification.id
       });
