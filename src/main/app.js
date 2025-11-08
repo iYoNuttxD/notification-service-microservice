@@ -5,7 +5,6 @@ const rateLimit = require('express-rate-limit');
 const swaggerUi = require('swagger-ui-express');
 const fs = require('fs');
 const path = require('path');
-const YAML = require('yaml');
 
 function createApp(container) {
   const app = express();
@@ -20,8 +19,7 @@ function createApp(container) {
             defaultSrc: ["'self'"],
             scriptSrc: ["'self'", "'unsafe-inline'"],
             styleSrc: ["'self'", "'unsafe-inline'"],
-            imgSrc: ["'self'", 'data:', 'https:'],
-            objectSrc: ["'none'"]
+            imgSrc: ["'self'", 'data:', 'https:']
           }
         }
       })(req, res, next);
@@ -54,69 +52,70 @@ function createApp(container) {
     next();
   });
 
-  // Raiz informativa
+  // Raiz responde JSON (sem 404)
   app.get('/', (_req, res) => {
     res.status(200).json({
       service: 'Notification Service',
       version: '1.0.0',
       endpoints: {
-        apiDocs: '/api-docs',
         health: '/api/v1/health',
         metrics: '/api/v1/metrics',
+        apiDocs: '/api-docs',
         notifications: '/api/v1/notifications',
         preferences: '/api/v1/preferences/:userId'
       }
     });
   });
 
-  // Swagger UI / Fallback JSON
-  const openapiPath = path.resolve(__dirname, '../../docs/openapi.yaml');
-  let spec = null;
-  let specError = null;
+  // Swagger UI + Fallback (SEM parse do YAML no servidor)
+  const docsDir = path.resolve(__dirname, '../../docs');
+  const openapiPath = path.join(docsDir, 'openapi.yaml');
 
   if (fs.existsSync(openapiPath)) {
-    try {
-      const raw = fs.readFileSync(openapiPath, 'utf8');
-      spec = YAML.parse(raw);
-      logger.info('OpenAPI spec loaded', { path: openapiPath });
-    } catch (err) {
-      specError = err;
-      logger.warn('Failed to parse OpenAPI spec', { error: err.message, path: openapiPath });
-    }
-  } else {
-    logger.warn('OpenAPI spec not found', { path: openapiPath });
-  }
+    // Servir o YAML diretamente
+    app.get('/api-docs/openapi.yaml', (_req, res) => {
+      res.sendFile(openapiPath);
+    });
 
-  if (spec && !specError) {
-    // Monta UI sem redirect 301
-    const uiHandler = (req, res, next) => {
-      const handler = swaggerUi.setup(spec, {
-        customSiteTitle: 'Notification Service API Docs',
-        swaggerOptions: { docExpansion: 'none' }
+    // Handler explícito primeiro (garante 200 em /api-docs e /api-docs/)
+    const swaggerHandler = (req, res, next) => {
+      const handler = swaggerUi.setup(null, {
+        swaggerOptions: { url: '/api-docs/openapi.yaml' }
       });
       handler(req, res, next);
     };
-    app.get('/api-docs', uiHandler);
-    app.get('/api-docs/', uiHandler);
-    app.use('/api-docs/', swaggerUi.serve);
+    app.get('/api-docs', swaggerHandler);
+    app.get('/api-docs/', swaggerHandler);
+
+    // Static assets do Swagger UI (DEPOIS dos GETs para evitar 301)
+    app.use('/api-docs', swaggerUi.serve);
+
+    logger.info('Swagger UI available at /api-docs');
   } else {
-    // JSON fallback (o teste espera application/json)
-    const jsonFallback = (_req, res) => {
+    logger.warn('OpenAPI documentation file not found', { path: openapiPath });
+
+    // Fallback informativo (sem 404) em /api-docs e /api-docs/
+    const docsFallback = (_req, res) => {
       res.status(200).json({
         status: 'unavailable',
-        message: specError
-          ? `OpenAPI spec parse failed: ${specError.message}`
-          : 'OpenAPI spec not found. Add docs/openapi.yaml to enable Swagger UI.',
+        message: 'OpenAPI spec not found. Add docs/openapi.yaml to enable Swagger UI.',
         expectedPath: openapiPath
       });
     };
-    app.get('/api-docs', jsonFallback);
-    app.get('/api-docs/', jsonFallback);
-    app.get('/api-docs/openapi.yaml', jsonFallback);
-    // Não monta swaggerUi.serve para evitar assets quebrados em fallback
+    app.get('/api-docs', docsFallback);
+    app.get('/api-docs/', docsFallback);
+
+    // Fallback para a URL do YAML
+    app.get('/api-docs/openapi.yaml', (_req, res) => {
+      res.status(200).json({
+        status: 'unavailable',
+        message: 'OpenAPI spec not found at expected path.',
+        expectedPath: openapiPath
+      });
+    });
   }
 
-  // Feature routes
+  // Mount feature routes
   const systemRoutes = require('../features/system/http/routes');
   const notificationRoutes = require('../features/notifications/http/routes');
   const preferencesRoutes = require('../features/preferences/http/routes');
