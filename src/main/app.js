@@ -2,7 +2,6 @@ const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
-const swaggerUi = require('swagger-ui-express');
 const fs = require('fs');
 const path = require('path');
 
@@ -13,7 +12,7 @@ function createApp(container) {
   /**
    * Helmet
    * - CSP padrão
-   * - CSP relaxado apenas para /api-docs (Swagger UI)
+   * - CSP relaxado apenas para /api-docs (Swagger UI via CDN)
    */
   const helmetDefault = helmet();
   const helmetDocs = helmet({
@@ -82,10 +81,9 @@ function createApp(container) {
 
   /**
    * Swagger UI / OpenAPI
-   * - openapi.yaml em /docs/openapi.yaml (raiz do projeto)
-   * - /api-docs e /api-docs/ -> 200 (HTML Swagger UI)
+   * - openapi.yaml em /docs/openapi.yaml
+   * - /api-docs e /api-docs/ -> 200 (HTML com Swagger UI via CDN)
    * - /api-docs/openapi.yaml -> YAML
-   * - /api-docs/* -> assets do Swagger UI (CSS/JS) com MIME correto
    */
   const docsDir = path.resolve(__dirname, '../../docs');
   const openapiPath = path.join(docsDir, 'openapi.yaml');
@@ -96,21 +94,45 @@ function createApp(container) {
       res.sendFile(openapiPath);
     });
 
-    // Handler HTML do Swagger UI (precisa vir ANTES do static pra evitar 301)
-    const swaggerHandler = swaggerUi.setup(null, {
-      swaggerOptions: {
-        url: '/api-docs/openapi.yaml'
-      }
-    });
+    // HTML do Swagger UI usando CDN (sem depender de arquivos locais)
+    const swaggerHtml = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Notification Service API Docs</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist/swagger-ui.css" />
+  <style>
+    body { margin: 0; padding: 0; }
+    #swagger-ui { margin: 0; }
+  </style>
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist/swagger-ui-bundle.js"></script>
+  <script src="https://unpkg.com/swagger-ui-dist/swagger-ui-standalone-preset.js"></script>
+  <script>
+    window.onload = () => {
+      window.ui = SwaggerUIBundle({
+        url: '/api-docs/openapi.yaml',
+        dom_id: '#swagger-ui',
+        presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
+        layout: "BaseLayout"
+      });
+    };
+  </script>
+</body>
+</html>
+    `.trim();
+
+    const swaggerHandler = (_req, res) => {
+      res.status(200).type('html').send(swaggerHtml);
+    };
 
     app.get('/api-docs', swaggerHandler);
     app.get('/api-docs/', swaggerHandler);
 
-    // Assets estáticos do Swagger UI em /api-docs/*
-    // (vem DEPOIS dos GETs, assim /api-docs não sofre redirect)
-    app.use('/api-docs', swaggerUi.serve);
-
-    logger.info('Swagger UI available at /api-docs');
+    logger.info('Swagger UI (CDN) available at /api-docs');
   } else {
     logger.warn('OpenAPI documentation file not found', { path: openapiPath });
 
@@ -125,7 +147,6 @@ function createApp(container) {
 
     app.get('/api-docs', docsFallback);
     app.get('/api-docs/', docsFallback);
-
     app.get('/api-docs/openapi.yaml', (_req, res) => {
       res.status(200).json({
         status: 'unavailable',
