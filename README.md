@@ -14,6 +14,11 @@ Microserviço de notificações multicanal para Click Delivery com suporte a Pus
 
 ---
 
+# Feito Por
+
+Daniel Ganz Musse, João Vitor de Souza Hernandes, Flavio Augusto da Cruz Melo, Matheus 
+Lowen, Enrico Malho Bozza 
+
 ## 📋 Sumário
 
 - [Visão Geral](#-visão-geral)
